@@ -149,6 +149,25 @@ export function bootstrap() {
   }
 
   const controls = getControls();
+  const CANONICAL_PARAM_SCHEMA = {
+    gear: {
+      module: "shared-module",
+      z1: "driver-teeth-z1",
+      z2: "driven-teeth-z2",
+    },
+    linkage: {
+      gear_radius: "gear-radius",
+      driver_radius: "driver-radius",
+      crank_radius: "crank-radius",
+      rod_length: "rod-length",
+      slider_offset: "slider-offset",
+      slider_axis: "slider-axis",
+    },
+    motion: {
+      motor_rpm: "motor-rpm",
+      angular_speed: "angular-speed",
+    },
+  };
   const simulation = {
     isPlaying: true,
     timeSeconds: 0,
@@ -173,6 +192,7 @@ export function bootstrap() {
       slider_offset: 0,
       slider_axis: "horizontal",
     },
+    normalizationError: null,
   };
 
   function applyTheme(theme) {
@@ -183,63 +203,124 @@ export function bootstrap() {
     }
   }
 
-  function syncParamsFromControls() {
-    const driverModule = Number(controls.driver_module?.value);
-    const sharedModule = Number(controls.module?.value);
-    const moduleValue = Number.isFinite(driverModule) && driverModule > 0 ? driverModule : sharedModule;
+  function parseOptionalNumber(control) {
+    const raw = control?.value?.trim() ?? "";
+    if (raw === "") {
+      return { present: false, value: Number.NaN };
+    }
 
-    const driverTeeth = Number(controls.driver_teeth?.value);
-    const z1 = Number(controls.z1?.value);
-    const driverToothCount = Number.isFinite(driverTeeth) && driverTeeth > 0 ? driverTeeth : z1;
+    const parsed = Number(raw);
+    return { present: true, value: parsed };
+  }
 
-    const drivenTeeth = Number(controls.driven_teeth?.value);
-    const z2 = Number(controls.z2?.value);
-    const drivenToothCount = Number.isFinite(drivenTeeth) && drivenTeeth > 0 ? drivenTeeth : z2;
-
-    const usesRealGearParameters =
-      Number.isFinite(moduleValue) &&
-      moduleValue > 0 &&
-      Number.isFinite(driverToothCount) &&
-      driverToothCount > 0 &&
-      Number.isFinite(drivenToothCount) &&
-      drivenToothCount > 0;
-
-    const driverPitchDiameter = usesRealGearParameters ? moduleValue * driverToothCount : Number.NaN;
-    const drivenPitchDiameter = usesRealGearParameters ? moduleValue * drivenToothCount : Number.NaN;
-    const derivedDriverRadius = driverPitchDiameter / 2;
-    const derivedDrivenRadius = drivenPitchDiameter / 2;
-
-    const fallbackGearRadius = Number(controls.gear_radius?.value ?? 1.6);
-    const fallbackDriverRadius = Number(controls.driver_radius?.value ?? 0.9);
-    const rpmInput = Number(controls.motor_rpm?.value ?? Number.NaN);
-    const angularSpeedInput = Number(controls.angular_speed?.value ?? 1.8);
-    const hasRpmInput = Number.isFinite(rpmInput);
-    const angularSpeedFromRpm = hasRpmInput ? (2 * Math.PI * rpmInput) / 60 : Number.NaN;
-    const angularSpeed = hasRpmInput ? angularSpeedFromRpm : angularSpeedInput;
-
-    simulation.params = {
-      ...simulation.params,
-      raw_driver_module: driverModule,
-      raw_shared_module: sharedModule,
-      raw_driver_teeth: driverToothCount,
-      raw_driven_teeth: drivenToothCount,
-      module: usesRealGearParameters ? moduleValue : Number.NaN,
-      driver_teeth: usesRealGearParameters ? driverToothCount : Number.NaN,
-      driven_teeth: usesRealGearParameters ? drivenToothCount : Number.NaN,
-      driver_pitch_diameter: usesRealGearParameters ? driverPitchDiameter : fallbackDriverRadius * 2,
-      driven_pitch_diameter: usesRealGearParameters ? drivenPitchDiameter : fallbackGearRadius * 2,
-      gear_radius: usesRealGearParameters ? derivedDrivenRadius : fallbackGearRadius,
-      driver_radius: usesRealGearParameters ? derivedDriverRadius : fallbackDriverRadius,
+  function normalizeControlParams() {
+    const parsed = {
+      module: parseOptionalNumber(controls.module),
+      z1: parseOptionalNumber(controls.z1),
+      z2: parseOptionalNumber(controls.z2),
+      deprecated_driver_module: parseOptionalNumber(controls.driver_module),
+      deprecated_driver_teeth: parseOptionalNumber(controls.driver_teeth),
+      deprecated_driven_teeth: parseOptionalNumber(controls.driven_teeth),
+      gear_radius: Number(controls.gear_radius?.value ?? 1.6),
+      driver_radius: Number(controls.driver_radius?.value ?? 0.9),
       crank_radius: Number(controls.crank_radius?.value ?? 1.2),
       rod_length: Number(controls.rod_length?.value ?? 3.2),
-      motor_rpm: hasRpmInput ? rpmInput : Number.NaN,
-      angular_speed: angularSpeed,
+      motor_rpm: parseOptionalNumber(controls.motor_rpm),
+      angular_speed: Number(controls.angular_speed?.value ?? 1.8),
       slider_offset: Number(controls.slider_offset?.value ?? 0),
       slider_axis: controls.slider_axis?.value === "vertical" ? "vertical" : "horizontal",
     };
 
-    if (controls.angular_speed && Number.isFinite(angularSpeedFromRpm)) {
-      controls.angular_speed.value = angularSpeedFromRpm.toFixed(3);
+    const conflicts = [];
+    const pairedFields = [
+      ["module", parsed.module, parsed.deprecated_driver_module, "module"],
+      ["z1", parsed.z1, parsed.deprecated_driver_teeth, "driver teeth"],
+      ["z2", parsed.z2, parsed.deprecated_driven_teeth, "driven teeth"],
+    ];
+
+    for (const [name, canonical, deprecated, label] of pairedFields) {
+      if (
+        canonical.present &&
+        deprecated.present &&
+        Number.isFinite(canonical.value) &&
+        Number.isFinite(deprecated.value) &&
+        canonical.value !== deprecated.value
+      ) {
+        conflicts.push(`${label}: canonical ${name}=${canonical.value} conflicts with deprecated value ${deprecated.value}`);
+      }
+    }
+
+    if (conflicts.length > 0) {
+      return { error: `Conflicting parameter inputs: ${conflicts.join("; ")}` };
+    }
+
+    const usesCanonicalGearSet =
+      Number.isFinite(parsed.module.value) &&
+      parsed.module.value > 0 &&
+      Number.isFinite(parsed.z1.value) &&
+      parsed.z1.value > 0 &&
+      Number.isFinite(parsed.z2.value) &&
+      parsed.z2.value > 0;
+
+    const driver_pitch_diameter = usesCanonicalGearSet
+      ? parsed.module.value * parsed.z1.value
+      : parsed.driver_radius * 2;
+    const driven_pitch_diameter = usesCanonicalGearSet
+      ? parsed.module.value * parsed.z2.value
+      : parsed.gear_radius * 2;
+    const computed_driver_radius = driver_pitch_diameter / 2;
+    const computed_gear_radius = driven_pitch_diameter / 2;
+    const hasRpmInput = parsed.motor_rpm.present && Number.isFinite(parsed.motor_rpm.value);
+    const angularSpeedFromRpm = hasRpmInput ? (2 * Math.PI * parsed.motor_rpm.value) / 60 : Number.NaN;
+
+    return {
+      params: {
+        ...simulation.params,
+        param_schema: CANONICAL_PARAM_SCHEMA,
+        raw_driver_module: parsed.deprecated_driver_module.value,
+        raw_shared_module: parsed.module.value,
+        raw_driver_teeth: parsed.z1.value,
+        raw_driven_teeth: parsed.z2.value,
+        module: usesCanonicalGearSet ? parsed.module.value : Number.NaN,
+        driver_teeth: usesCanonicalGearSet ? parsed.z1.value : Number.NaN,
+        driven_teeth: usesCanonicalGearSet ? parsed.z2.value : Number.NaN,
+        driver_pitch_diameter,
+        driven_pitch_diameter,
+        gear_radius: usesCanonicalGearSet ? computed_gear_radius : parsed.gear_radius,
+        driver_radius: usesCanonicalGearSet ? computed_driver_radius : parsed.driver_radius,
+        crank_radius: parsed.crank_radius,
+        rod_length: parsed.rod_length,
+        motor_rpm: hasRpmInput ? parsed.motor_rpm.value : Number.NaN,
+        angular_speed: hasRpmInput ? angularSpeedFromRpm : parsed.angular_speed,
+        slider_offset: parsed.slider_offset,
+        slider_axis: parsed.slider_axis,
+      },
+      angularSpeedFromRpm,
+    };
+  }
+
+  function syncParamsFromControls() {
+    const normalization = normalizeControlParams();
+    simulation.normalizationError = normalization.error ?? null;
+
+    if (normalization.params) {
+      simulation.params = normalization.params;
+    }
+
+    if (controls.angular_speed && Number.isFinite(normalization.angularSpeedFromRpm)) {
+      controls.angular_speed.value = normalization.angularSpeedFromRpm.toFixed(3);
+    }
+
+    if (!simulation.normalizationError && controls.driver_module) {
+      controls.driver_module.value = controls.module?.value ?? "";
+    }
+
+    if (!simulation.normalizationError && controls.driver_teeth) {
+      controls.driver_teeth.value = controls.z1?.value ?? "";
+    }
+
+    if (!simulation.normalizationError && controls.driven_teeth) {
+      controls.driven_teeth.value = controls.z2?.value ?? "";
     }
   }
 
@@ -276,6 +357,11 @@ export function bootstrap() {
     );
 
     updateSelectionPanel(state);
+
+    if (simulation.normalizationError) {
+      status.textContent = `Invalid parameters: ${simulation.normalizationError}`;
+      return;
+    }
 
     const invalidPrefix = state.invalidCategory === "constraint" ? "Invalid parameters" : "Invalid geometry";
 
@@ -315,9 +401,6 @@ export function bootstrap() {
   }
 
   [
-    controls.driver_module,
-    controls.driver_teeth,
-    controls.driven_teeth,
     controls.module,
     controls.z1,
     controls.z2,
@@ -325,6 +408,7 @@ export function bootstrap() {
     controls.crank_radius,
     controls.driver_radius,
     controls.rod_length,
+    controls.motor_rpm,
     controls.angular_speed,
     controls.slider_offset,
     controls.slider_axis,
