@@ -1,4 +1,98 @@
 (function attachComputeState(globalScope) {
+  const DEFAULT_SCENE_TEMPLATE = {
+    rail: {
+      stroke: "#7c3aed",
+      lineWidth: 3,
+      margin: 20,
+    },
+    gear: {
+      stroke: "#2563eb",
+      fill: "#dbeafe",
+      lineWidth: 4,
+      toothStroke: "#1d4ed8",
+      toothLineWidth: 3,
+      minToothCount: 10,
+      teethPerRadiusUnit: 10,
+      toothDepthFactor: 0.1,
+      minToothDepthPx: 5,
+    },
+    centerMarker: {
+      fill: "#0f172a",
+      radiusPx: 4,
+    },
+    rotationArrow: {
+      stroke: "#0ea5e9",
+      fill: "#0ea5e9",
+      lineWidth: 2,
+      shaftLengthPx: 18,
+      headLengthPx: 5,
+      directionWithPositiveSpeed: -1,
+    },
+    crankArm: {
+      stroke: "#475569",
+      lineWidth: 5,
+    },
+    connectingRod: {
+      stroke: "#f97316",
+      lineWidth: 3,
+    },
+    crankPin: {
+      fill: "#dc2626",
+      radiusPx: 6,
+    },
+    sliderBlock: {
+      fill: "#16a34a",
+      horizontal: { widthPx: 28, heightPx: 22 },
+      vertical: { widthPx: 22, heightPx: 28 },
+    },
+  };
+
+  function deepMerge(base, override) {
+    if (!override || typeof override !== "object" || Array.isArray(override)) {
+      return base;
+    }
+
+    const output = { ...base };
+    Object.keys(override).forEach((key) => {
+      const baseValue = output[key];
+      const overrideValue = override[key];
+
+      if (
+        baseValue &&
+        typeof baseValue === "object" &&
+        !Array.isArray(baseValue) &&
+        overrideValue &&
+        typeof overrideValue === "object" &&
+        !Array.isArray(overrideValue)
+      ) {
+        output[key] = deepMerge(baseValue, overrideValue);
+        return;
+      }
+
+      output[key] = overrideValue;
+    });
+
+    return output;
+  }
+
+  async function loadSceneTemplate(url) {
+    if (typeof fetch !== "function") {
+      return DEFAULT_SCENE_TEMPLATE;
+    }
+
+    try {
+      const response = await fetch(url, { cache: "no-cache" });
+      if (!response.ok) {
+        return DEFAULT_SCENE_TEMPLATE;
+      }
+
+      const json = await response.json();
+      return deepMerge(DEFAULT_SCENE_TEMPLATE, json);
+    } catch {
+      return DEFAULT_SCENE_TEMPLATE;
+    }
+  }
+
   /**
    * Compute deterministic kinematic state for a gear-crank-slider mechanism.
    *
@@ -144,7 +238,7 @@
     };
   }
 
-  function drawScene(ctx, canvas, params, state) {
+  function drawScene(ctx, canvas, params, state, scene) {
     const t = createTransform(canvas, params, state);
     const center = t.toCanvas({ x: 0, y: 0 });
     const crank = t.toCanvas(state.crank);
@@ -153,32 +247,71 @@
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // 1) guide rail
-    ctx.strokeStyle = "#7c3aed";
-    ctx.lineWidth = 3;
+    ctx.strokeStyle = scene.rail.stroke;
+    ctx.lineWidth = scene.rail.lineWidth;
     if (params.slider_axis === "horizontal") {
       const railY = t.toCanvas({ x: 0, y: params.slider_offset }).y;
       ctx.beginPath();
-      ctx.moveTo(20, railY);
-      ctx.lineTo(canvas.width - 20, railY);
+      ctx.moveTo(scene.rail.margin, railY);
+      ctx.lineTo(canvas.width - scene.rail.margin, railY);
       ctx.stroke();
     } else {
       const railX = t.toCanvas({ x: params.slider_offset, y: 0 }).x;
       ctx.beginPath();
-      ctx.moveTo(railX, 20);
-      ctx.lineTo(railX, canvas.height - 20);
+      ctx.moveTo(railX, scene.rail.margin);
+      ctx.lineTo(railX, canvas.height - scene.rail.margin);
       ctx.stroke();
     }
 
-    // 2) gear and center marker
-    ctx.strokeStyle = "#2563eb";
-    ctx.lineWidth = 4;
+    // 2) gear body + rotating teeth
+    const gearCanvasRadius = t.toCanvasLength(params.gear_radius);
+    const toothCount = Math.max(
+      scene.gear.minToothCount,
+      Math.round(params.gear_radius * scene.gear.teethPerRadiusUnit)
+    );
+    const toothDepth = Math.max(
+      scene.gear.minToothDepthPx,
+      gearCanvasRadius * scene.gear.toothDepthFactor
+    );
+
+    ctx.strokeStyle = scene.gear.toothStroke;
+    ctx.lineWidth = scene.gear.toothLineWidth;
+    for (let i = 0; i < toothCount; i += 1) {
+      const toothAngle = state.gear_angle + (i / toothCount) * Math.PI * 2;
+      const inner = {
+        x: center.x + Math.cos(toothAngle) * gearCanvasRadius,
+        y: center.y - Math.sin(toothAngle) * gearCanvasRadius,
+      };
+      const outer = {
+        x: center.x + Math.cos(toothAngle) * (gearCanvasRadius + toothDepth),
+        y: center.y - Math.sin(toothAngle) * (gearCanvasRadius + toothDepth),
+      };
+
+      ctx.beginPath();
+      ctx.moveTo(inner.x, inner.y);
+      ctx.lineTo(outer.x, outer.y);
+      ctx.stroke();
+    }
+
+    ctx.strokeStyle = scene.gear.stroke;
+    ctx.lineWidth = scene.gear.lineWidth;
     ctx.beginPath();
-    ctx.arc(center.x, center.y, t.toCanvasLength(params.gear_radius), 0, Math.PI * 2);
+    ctx.arc(center.x, center.y, gearCanvasRadius, 0, Math.PI * 2);
     ctx.stroke();
 
-    ctx.fillStyle = "#0f172a";
+    ctx.fillStyle = scene.gear.fill;
     ctx.beginPath();
-    ctx.arc(center.x, center.y, 4, 0, Math.PI * 2);
+    ctx.arc(center.x, center.y, Math.max(1, gearCanvasRadius - 2), 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = scene.gear.stroke;
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, gearCanvasRadius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = scene.centerMarker.fill;
+    ctx.beginPath();
+    ctx.arc(center.x, center.y, scene.centerMarker.radiusPx, 0, Math.PI * 2);
     ctx.fill();
 
     // rim arrow for rotation direction
@@ -188,19 +321,22 @@
       x: center.x + Math.cos(arrowAngle) * arrowRadius,
       y: center.y - Math.sin(arrowAngle) * arrowRadius,
     };
-    const direction = params.angular_speed >= 0 ? -1 : 1;
+    const direction =
+      params.angular_speed >= 0
+        ? scene.rotationArrow.directionWithPositiveSpeed
+        : -scene.rotationArrow.directionWithPositiveSpeed;
     const tangent = {
       x: -Math.sin(arrowAngle) * direction,
       y: -Math.cos(arrowAngle) * direction,
     };
     const arrowTip = {
-      x: arrowTail.x + tangent.x * 18,
-      y: arrowTail.y + tangent.y * 18,
+      x: arrowTail.x + tangent.x * scene.rotationArrow.shaftLengthPx,
+      y: arrowTail.y + tangent.y * scene.rotationArrow.shaftLengthPx,
     };
 
-    ctx.strokeStyle = "#0ea5e9";
-    ctx.fillStyle = "#0ea5e9";
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = scene.rotationArrow.stroke;
+    ctx.fillStyle = scene.rotationArrow.fill;
+    ctx.lineWidth = scene.rotationArrow.lineWidth;
     ctx.beginPath();
     ctx.moveTo(arrowTail.x, arrowTail.y);
     ctx.lineTo(arrowTip.x, arrowTip.y);
@@ -208,34 +344,48 @@
 
     ctx.beginPath();
     ctx.moveTo(arrowTip.x, arrowTip.y);
-    ctx.lineTo(arrowTip.x - tangent.y * 5 - tangent.x * 5, arrowTip.y + tangent.x * 5 - tangent.y * 5);
-    ctx.lineTo(arrowTip.x + tangent.y * 5 - tangent.x * 5, arrowTip.y - tangent.x * 5 - tangent.y * 5);
+    ctx.lineTo(
+      arrowTip.x - tangent.y * scene.rotationArrow.headLengthPx - tangent.x * scene.rotationArrow.headLengthPx,
+      arrowTip.y + tangent.x * scene.rotationArrow.headLengthPx - tangent.y * scene.rotationArrow.headLengthPx
+    );
+    ctx.lineTo(
+      arrowTip.x + tangent.y * scene.rotationArrow.headLengthPx - tangent.x * scene.rotationArrow.headLengthPx,
+      arrowTip.y - tangent.x * scene.rotationArrow.headLengthPx - tangent.y * scene.rotationArrow.headLengthPx
+    );
     ctx.closePath();
     ctx.fill();
 
-    // 3) connecting rod
-    ctx.strokeStyle = "#f97316";
-    ctx.lineWidth = 3;
+    // 3) crank arm on the gear face (offset pin)
+    ctx.strokeStyle = scene.crankArm.stroke;
+    ctx.lineWidth = scene.crankArm.lineWidth;
+    ctx.beginPath();
+    ctx.moveTo(center.x, center.y);
+    ctx.lineTo(crank.x, crank.y);
+    ctx.stroke();
+
+    // 4) connecting rod
+    ctx.strokeStyle = scene.connectingRod.stroke;
+    ctx.lineWidth = scene.connectingRod.lineWidth;
     ctx.beginPath();
     ctx.moveTo(crank.x, crank.y);
     ctx.lineTo(slider.x, slider.y);
     ctx.stroke();
 
-    // 4) crank pin
-    ctx.fillStyle = "#dc2626";
+    // 5) crank pin
+    ctx.fillStyle = scene.crankPin.fill;
     ctx.beginPath();
-    ctx.arc(crank.x, crank.y, 6, 0, Math.PI * 2);
+    ctx.arc(crank.x, crank.y, scene.crankPin.radiusPx, 0, Math.PI * 2);
     ctx.fill();
 
-    // 5) slider block
-    ctx.fillStyle = "#16a34a";
-    const sliderWidth = params.slider_axis === "horizontal" ? 28 : 22;
-    const sliderHeight = params.slider_axis === "horizontal" ? 22 : 28;
+    // 6) slider block
+    ctx.fillStyle = scene.sliderBlock.fill;
+    const sliderDimensions =
+      params.slider_axis === "horizontal" ? scene.sliderBlock.horizontal : scene.sliderBlock.vertical;
     ctx.fillRect(
-      slider.x - sliderWidth / 2,
-      slider.y - sliderHeight / 2,
-      sliderWidth,
-      sliderHeight
+      slider.x - sliderDimensions.widthPx / 2,
+      slider.y - sliderDimensions.heightPx / 2,
+      sliderDimensions.widthPx,
+      sliderDimensions.heightPx
     );
   }
 
@@ -266,6 +416,7 @@
       isPlaying: true,
       timeSeconds: 0,
       lastTimestamp: null,
+      scene: DEFAULT_SCENE_TEMPLATE,
       params: {
         initial_angle: 0,
         crank_angle_offset: 0,
@@ -293,7 +444,7 @@
     function renderScene() {
       const state = computeState(simulation.params, simulation.timeSeconds);
 
-      drawScene(ctx, canvas, simulation.params, state);
+      drawScene(ctx, canvas, simulation.params, state, simulation.scene);
 
       status.textContent = state.valid
         ? `${simulation.isPlaying ? "Running" : "Paused"} (${simulation.params.slider_axis}) t=${simulation.timeSeconds.toFixed(2)}s`
@@ -354,12 +505,17 @@
     });
 
     syncParamsFromControls();
+    loadSceneTemplate("/static/templates/default-scene.json").then((scene) => {
+      simulation.scene = scene;
+      renderScene();
+    });
+
     renderScene();
     requestAnimationFrame(renderLoop);
   }
 
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { computeState };
+    module.exports = { computeState, deepMerge, DEFAULT_SCENE_TEMPLATE };
   }
 
   globalScope.computeState = computeState;
