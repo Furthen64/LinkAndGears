@@ -310,6 +310,9 @@
         title: "Gear",
         details: [
           ["Radius", formatValue(params.gear_radius)],
+          ["Driven pitch diameter", formatValue(params.driven_pitch_diameter)],
+          ["Module", formatValue(params.module)],
+          ["Driven teeth", formatValue(params.driven_teeth, 0)],
           ["Angular speed", formatValue(params.angular_speed)],
           ["Current angle", formatValue(state.gear_angle)],
           ["Center", "(0.000, 0.000)"],
@@ -322,6 +325,9 @@
         title: "Motor gear",
         details: [
           ["Radius", formatValue(params.driver_radius)],
+          ["Driver pitch diameter", formatValue(params.driver_pitch_diameter)],
+          ["Module", formatValue(params.module)],
+          ["Driver teeth", formatValue(params.driver_teeth, 0)],
           ["Angular speed", formatValue(params.angular_speed)],
           ["Current angle", formatValue(state.driver_angle)],
           ["Center", `(${formatValue(-(params.gear_radius + params.driver_radius))}, 0.000)`],
@@ -692,6 +698,12 @@
     const controls = {
       play_pause: document.getElementById("play-pause"),
       reset_time: document.getElementById("reset-time"),
+      driver_module: document.getElementById("driver-module"),
+      driver_teeth: document.getElementById("driver-teeth"),
+      driven_teeth: document.getElementById("driven-teeth"),
+      module: document.getElementById("shared-module"),
+      z1: document.getElementById("driver-teeth-z1"),
+      z2: document.getElementById("driven-teeth-z2"),
       gear_radius: document.getElementById("gear-radius"),
       crank_radius: document.getElementById("crank-radius"),
       driver_radius: document.getElementById("driver-radius"),
@@ -714,6 +726,11 @@
       params: {
         initial_angle: 0,
         crank_angle_offset: 0,
+        module: Number.NaN,
+        driver_teeth: Number.NaN,
+        driven_teeth: Number.NaN,
+        driver_pitch_diameter: 1.8,
+        driven_pitch_diameter: 3.2,
         gear_radius: 1.6,
         driver_radius: 0.9,
         crank_radius: 1.2,
@@ -733,10 +750,49 @@
     }
 
     function syncParamsFromControls() {
+      const driverModule = Number(controls.driver_module?.value);
+      const sharedModule = Number(controls.module?.value);
+      const moduleValue = Number.isFinite(driverModule) && driverModule > 0
+        ? driverModule
+        : sharedModule;
+
+      const driverTeeth = Number(controls.driver_teeth?.value);
+      const z1 = Number(controls.z1?.value);
+      const driverToothCount = Number.isFinite(driverTeeth) && driverTeeth > 0 ? driverTeeth : z1;
+
+      const drivenTeeth = Number(controls.driven_teeth?.value);
+      const z2 = Number(controls.z2?.value);
+      const drivenToothCount = Number.isFinite(drivenTeeth) && drivenTeeth > 0 ? drivenTeeth : z2;
+
+      const usesRealGearParameters =
+        Number.isFinite(moduleValue) &&
+        moduleValue > 0 &&
+        Number.isFinite(driverToothCount) &&
+        driverToothCount > 0 &&
+        Number.isFinite(drivenToothCount) &&
+        drivenToothCount > 0;
+
+      const driverPitchDiameter = usesRealGearParameters
+        ? moduleValue * driverToothCount
+        : Number.NaN;
+      const drivenPitchDiameter = usesRealGearParameters
+        ? moduleValue * drivenToothCount
+        : Number.NaN;
+      const derivedDriverRadius = driverPitchDiameter / 2;
+      const derivedDrivenRadius = drivenPitchDiameter / 2;
+
+      const fallbackGearRadius = Number(controls.gear_radius?.value ?? 1.6);
+      const fallbackDriverRadius = Number(controls.driver_radius?.value ?? 0.9);
+
       simulation.params = {
         ...simulation.params,
-        gear_radius: Number(controls.gear_radius?.value ?? 1.6),
-        driver_radius: Number(controls.driver_radius?.value ?? 0.9),
+        module: usesRealGearParameters ? moduleValue : Number.NaN,
+        driver_teeth: usesRealGearParameters ? driverToothCount : Number.NaN,
+        driven_teeth: usesRealGearParameters ? drivenToothCount : Number.NaN,
+        driver_pitch_diameter: usesRealGearParameters ? driverPitchDiameter : fallbackDriverRadius * 2,
+        driven_pitch_diameter: usesRealGearParameters ? drivenPitchDiameter : fallbackGearRadius * 2,
+        gear_radius: usesRealGearParameters ? derivedDrivenRadius : fallbackGearRadius,
+        driver_radius: usesRealGearParameters ? derivedDriverRadius : fallbackDriverRadius,
         crank_radius: Number(controls.crank_radius?.value ?? 1.2),
         rod_length: Number(controls.rod_length?.value ?? 3.2),
         angular_speed: Number(controls.angular_speed?.value ?? 1.8),
@@ -815,6 +871,12 @@
     }
 
     [
+      controls.driver_module,
+      controls.driver_teeth,
+      controls.driven_teeth,
+      controls.module,
+      controls.z1,
+      controls.z2,
       controls.gear_radius,
       controls.crank_radius,
       controls.driver_radius,
