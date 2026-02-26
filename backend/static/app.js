@@ -238,7 +238,75 @@
     };
   }
 
-  function drawScene(ctx, canvas, params, state, scene) {
+
+  function formatValue(value, digits = 3) {
+    return Number.isFinite(value) ? value.toFixed(digits) : "N/A";
+  }
+
+  function distanceToSegment(point, a, b) {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) {
+      return Math.hypot(point.x - a.x, point.y - a.y);
+    }
+
+    const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
+    const projection = { x: a.x + t * dx, y: a.y + t * dy };
+    return Math.hypot(point.x - projection.x, point.y - projection.y);
+  }
+
+  function objectDetails(selection, params, state) {
+    if (!selection) {
+      return { title: "No object selected", details: [] };
+    }
+
+    if (selection === "gear") {
+      return {
+        title: "Gear",
+        details: [
+          ["Radius", formatValue(params.gear_radius)],
+          ["Angular speed", formatValue(params.angular_speed)],
+          ["Current angle", formatValue(state.gear_angle)],
+          ["Center", "(0.000, 0.000)"],
+        ],
+      };
+    }
+
+    if (selection === "linkage") {
+      return {
+        title: "Linkage",
+        details: [
+          ["Crank radius", formatValue(params.crank_radius)],
+          ["Rod length", formatValue(params.rod_length)],
+          ["Crank pin", `(${formatValue(state.crank.x)}, ${formatValue(state.crank.y)})`],
+          ["Slider joint", `(${formatValue(state.slider.x)}, ${formatValue(state.slider.y)})`],
+        ],
+      };
+    }
+
+    if (selection === "ground") {
+      return {
+        title: "Ground",
+        details: [
+          ["Slider axis", params.slider_axis],
+          ["Rail offset", formatValue(params.slider_offset)],
+          ["Ground origin", "(0.000, 0.000)"],
+        ],
+      };
+    }
+
+    return {
+      title: "Slider",
+      details: [
+        ["Axis", params.slider_axis],
+        ["Offset", formatValue(params.slider_offset)],
+        ["Position", `(${formatValue(state.slider.x)}, ${formatValue(state.slider.y)})`],
+      ],
+    };
+  }
+
+  function drawScene(ctx, canvas, params, state, scene, selectedObject) {
     const t = createTransform(canvas, params, state);
     const center = t.toCanvas({ x: 0, y: 0 });
     const crank = t.toCanvas(state.crank);
@@ -387,6 +455,105 @@
       sliderDimensions.widthPx,
       sliderDimensions.heightPx
     );
+
+    const selectionStroke = "#111827";
+    const selectionWidth = 2;
+    if (selectedObject === "gear") {
+      ctx.strokeStyle = selectionStroke;
+      ctx.lineWidth = selectionWidth;
+      ctx.beginPath();
+      ctx.arc(center.x, center.y, gearCanvasRadius + toothDepth + 4, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (selectedObject === "linkage") {
+      ctx.strokeStyle = selectionStroke;
+      ctx.lineWidth = selectionWidth;
+      ctx.beginPath();
+      ctx.moveTo(center.x, center.y);
+      ctx.lineTo(crank.x, crank.y);
+      ctx.lineTo(slider.x, slider.y);
+      ctx.stroke();
+    } else if (selectedObject === "ground") {
+      ctx.strokeStyle = selectionStroke;
+      ctx.lineWidth = selectionWidth;
+      ctx.setLineDash([6, 4]);
+      if (params.slider_axis === "horizontal") {
+        const railY = t.toCanvas({ x: 0, y: params.slider_offset }).y;
+        ctx.beginPath();
+        ctx.moveTo(scene.rail.margin, railY);
+        ctx.lineTo(canvas.width - scene.rail.margin, railY);
+        ctx.stroke();
+      } else {
+        const railX = t.toCanvas({ x: params.slider_offset, y: 0 }).x;
+        ctx.beginPath();
+        ctx.moveTo(railX, scene.rail.margin);
+        ctx.lineTo(railX, canvas.height - scene.rail.margin);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    } else if (selectedObject === "slider") {
+      ctx.strokeStyle = selectionStroke;
+      ctx.lineWidth = selectionWidth;
+      ctx.strokeRect(
+        slider.x - sliderDimensions.widthPx / 2 - 2,
+        slider.y - sliderDimensions.heightPx / 2 - 2,
+        sliderDimensions.widthPx + 4,
+        sliderDimensions.heightPx + 4
+      );
+    }
+
+    const railTolerance = 8;
+    const linkageTolerance = 8;
+
+    const hitRegions = [
+      {
+        name: "slider",
+        contains(point) {
+          return (
+            point.x >= slider.x - sliderDimensions.widthPx / 2 &&
+            point.x <= slider.x + sliderDimensions.widthPx / 2 &&
+            point.y >= slider.y - sliderDimensions.heightPx / 2 &&
+            point.y <= slider.y + sliderDimensions.heightPx / 2
+          );
+        },
+      },
+      {
+        name: "linkage",
+        contains(point) {
+          const closeToCrankArm = distanceToSegment(point, center, crank) <= linkageTolerance;
+          const closeToRod = distanceToSegment(point, crank, slider) <= linkageTolerance;
+          const closeToPin = Math.hypot(point.x - crank.x, point.y - crank.y) <= scene.crankPin.radiusPx + 4;
+          return closeToCrankArm || closeToRod || closeToPin;
+        },
+      },
+      {
+        name: "gear",
+        contains(point) {
+          return Math.hypot(point.x - center.x, point.y - center.y) <= gearCanvasRadius + toothDepth + 4;
+        },
+      },
+      {
+        name: "ground",
+        contains(point) {
+          if (params.slider_axis === "horizontal") {
+            const railY = t.toCanvas({ x: 0, y: params.slider_offset }).y;
+            return (
+              Math.abs(point.y - railY) <= railTolerance &&
+              point.x >= scene.rail.margin &&
+              point.x <= canvas.width - scene.rail.margin
+            );
+          }
+
+          const railX = t.toCanvas({ x: params.slider_offset, y: 0 }).x;
+          return (
+            Math.abs(point.x - railX) <= railTolerance &&
+            point.y >= scene.rail.margin &&
+            point.y <= canvas.height - scene.rail.margin
+          );
+        },
+      },
+    ];
+
+    return hitRegions;
   }
 
   function bootstrap() {
@@ -410,6 +577,8 @@
       angular_speed: document.getElementById("angular-speed"),
       slider_offset: document.getElementById("slider-offset"),
       slider_axis: document.getElementById("slider-axis"),
+      selection_name: document.getElementById("selection-name"),
+      selection_details: document.getElementById("selection-details"),
     };
 
     const simulation = {
@@ -417,6 +586,8 @@
       timeSeconds: 0,
       lastTimestamp: null,
       scene: DEFAULT_SCENE_TEMPLATE,
+      selectedObject: null,
+      hitRegions: [],
       params: {
         initial_angle: 0,
         crank_angle_offset: 0,
@@ -441,10 +612,38 @@
       };
     }
 
+    function updateSelectionPanel(state) {
+      if (!controls.selection_name || !controls.selection_details) {
+        return;
+      }
+
+      const data = objectDetails(simulation.selectedObject, simulation.params, state);
+      controls.selection_name.textContent = data.title;
+      controls.selection_details.innerHTML = "";
+
+      data.details.forEach(([label, value]) => {
+        const dt = document.createElement("dt");
+        dt.textContent = label;
+        const dd = document.createElement("dd");
+        dd.textContent = value;
+        controls.selection_details.appendChild(dt);
+        controls.selection_details.appendChild(dd);
+      });
+    }
+
     function renderScene() {
       const state = computeState(simulation.params, simulation.timeSeconds);
 
-      drawScene(ctx, canvas, simulation.params, state, simulation.scene);
+      simulation.hitRegions = drawScene(
+        ctx,
+        canvas,
+        simulation.params,
+        state,
+        simulation.scene,
+        simulation.selectedObject
+      );
+
+      updateSelectionPanel(state);
 
       status.textContent = state.valid
         ? `${simulation.isPlaying ? "Running" : "Paused"} (${simulation.params.slider_axis}) t=${simulation.timeSeconds.toFixed(2)}s`
@@ -501,6 +700,20 @@
     controls.reset_time?.addEventListener("click", () => {
       simulation.timeSeconds = 0;
       simulation.lastTimestamp = performance.now();
+      renderScene();
+    });
+
+    canvas.addEventListener("click", (event) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const point = {
+        x: (event.clientX - rect.left) * scaleX,
+        y: (event.clientY - rect.top) * scaleY,
+      };
+
+      const matched = simulation.hitRegions.find((region) => region.contains(point));
+      simulation.selectedObject = matched ? matched.name : null;
       renderScene();
     });
 
