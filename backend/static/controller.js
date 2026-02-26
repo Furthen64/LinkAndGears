@@ -128,6 +128,9 @@ function getControls() {
     slider_offset: document.getElementById("slider-offset"),
     slider_axis: document.getElementById("slider-axis"),
     theme_mode: document.getElementById("theme-mode"),
+    derived_driver_radius: document.getElementById("derived-driver-radius"),
+    derived_gear_radius: document.getElementById("derived-gear-radius"),
+    derived_angular_speed: document.getElementById("derived-angular-speed"),
     selection_name: document.getElementById("selection-name"),
     selection_details: document.getElementById("selection-details"),
   };
@@ -277,10 +280,23 @@ export function bootstrap() {
       simulation.params = normalization.params;
     }
 
-    if (controls.angular_speed && Number.isFinite(normalization.angularSpeedFromRpm)) {
-      controls.angular_speed.value = normalization.angularSpeedFromRpm.toFixed(3);
+    if (controls.derived_driver_radius) {
+      controls.derived_driver_radius.value = Number.isFinite(simulation.params.driver_radius)
+        ? simulation.params.driver_radius.toFixed(3)
+        : "";
     }
 
+    if (controls.derived_gear_radius) {
+      controls.derived_gear_radius.value = Number.isFinite(simulation.params.gear_radius)
+        ? simulation.params.gear_radius.toFixed(3)
+        : "";
+    }
+
+    if (controls.derived_angular_speed) {
+      controls.derived_angular_speed.value = Number.isFinite(simulation.params.angular_speed)
+        ? simulation.params.angular_speed.toFixed(3)
+        : "";
+    }
   }
 
   function updateSelectionPanel(state) {
