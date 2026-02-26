@@ -197,18 +197,14 @@
     };
   }
 
-  function createTransform(canvas, params, state) {
-    const safeSliderX = Number.isFinite(state.slider.x) ? state.slider.x : 0;
-    const safeSliderY = Number.isFinite(state.slider.y) ? state.slider.y : 0;
+  function createTransform(canvas, params) {
+    const maxLinkageReach = Math.abs(params.crank_radius) + Math.abs(params.rod_length);
     const extent =
       Math.max(
         1,
-        params.gear_radius,
-        params.crank_radius,
-        params.rod_length,
-        Math.abs(params.slider_offset),
-        Math.abs(safeSliderX),
-        Math.abs(safeSliderY)
+        Math.abs(params.gear_radius),
+        maxLinkageReach,
+        Math.abs(params.slider_offset)
       ) + 1;
 
     const worldMinX = -extent;
@@ -257,6 +253,12 @@
   }
 
   function objectDetails(selection, params, state) {
+    const currentCrankArmLength = Math.hypot(state.crank.x, state.crank.y);
+    const currentRodLength = Math.hypot(
+      state.slider.x - state.crank.x,
+      state.slider.y - state.crank.y
+    );
+
     if (!selection) {
       return { title: "No object selected", details: [] };
     }
@@ -277,8 +279,10 @@
       return {
         title: "Linkage",
         details: [
-          ["Crank radius", formatValue(params.crank_radius)],
-          ["Rod length", formatValue(params.rod_length)],
+          ["Crank arm length", formatValue(currentCrankArmLength)],
+          ["Crank radius (configured)", formatValue(params.crank_radius)],
+          ["Rod length", formatValue(currentRodLength)],
+          ["Rod length (configured)", formatValue(params.rod_length)],
           ["Crank pin", `(${formatValue(state.crank.x)}, ${formatValue(state.crank.y)})`],
           ["Slider joint", `(${formatValue(state.slider.x)}, ${formatValue(state.slider.y)})`],
         ],
@@ -307,7 +311,7 @@
   }
 
   function drawScene(ctx, canvas, params, state, scene, selectedObject) {
-    const t = createTransform(canvas, params, state);
+    const t = createTransform(canvas, params);
     const center = t.toCanvas({ x: 0, y: 0 });
     const crank = t.toCanvas(state.crank);
     const slider = t.toCanvas(state.slider);
