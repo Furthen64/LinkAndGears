@@ -460,7 +460,7 @@
       sliderDimensions.heightPx
     );
 
-    const selectionStroke = "#111827";
+    const selectionStroke = document.body?.dataset.theme === "light" ? "#111827" : "#f8fafc";
     const selectionWidth = 2;
     if (selectedObject === "gear") {
       ctx.strokeStyle = selectionStroke;
@@ -581,6 +581,7 @@
       angular_speed: document.getElementById("angular-speed"),
       slider_offset: document.getElementById("slider-offset"),
       slider_axis: document.getElementById("slider-axis"),
+      theme_mode: document.getElementById("theme-mode"),
       selection_name: document.getElementById("selection-name"),
       selection_details: document.getElementById("selection-details"),
     };
@@ -603,6 +604,14 @@
         slider_axis: "horizontal",
       },
     };
+
+    function applyTheme(theme) {
+      const normalizedTheme = theme === "light" ? "light" : "dark";
+      document.body.dataset.theme = normalizedTheme;
+      if (controls.theme_mode) {
+        controls.theme_mode.value = normalizedTheme;
+      }
+    }
 
     function syncParamsFromControls() {
       simulation.params = {
@@ -694,6 +703,15 @@
       controls.slider_axis,
     ].forEach(attachLiveUpdates);
 
+    controls.theme_mode?.addEventListener("input", () => {
+      applyTheme(controls.theme_mode.value);
+      renderScene();
+    });
+    controls.theme_mode?.addEventListener("change", () => {
+      applyTheme(controls.theme_mode.value);
+      renderScene();
+    });
+
     controls.play_pause?.addEventListener("click", () => {
       simulation.isPlaying = !simulation.isPlaying;
       controls.play_pause.textContent = simulation.isPlaying ? "Pause" : "Play";
@@ -721,6 +739,7 @@
       renderScene();
     });
 
+    applyTheme(controls.theme_mode?.value);
     syncParamsFromControls();
     loadSceneTemplate("/static/templates/default-scene.json").then((scene) => {
       simulation.scene = scene;
