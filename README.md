@@ -15,3 +15,9 @@ See TASK.md
 2. Start the development server:
    - `uvicorn backend.main:app --reload`
 3. Open `http://127.0.0.1:8000` in your browser.
+
+
+## Scene templates
+
+Visual styling for the canvas scene is configurable via JSON templates in `backend/static/templates/`.
+The app loads `default-scene.json` at runtime so colors, line widths, tooth density, and component sizes can be adjusted without changing JavaScript.

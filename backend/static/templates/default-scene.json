@@ -1,0 +1,53 @@
+{
+  "rail": {
+    "stroke": "#7c3aed",
+    "lineWidth": 3,
+    "margin": 20
+  },
+  "gear": {
+    "stroke": "#2563eb",
+    "fill": "#dbeafe",
+    "lineWidth": 4,
+    "toothStroke": "#1d4ed8",
+    "toothLineWidth": 3,
+    "minToothCount": 10,
+    "teethPerRadiusUnit": 10,
+    "toothDepthFactor": 0.1,
+    "minToothDepthPx": 5
+  },
+  "centerMarker": {
+    "fill": "#0f172a",
+    "radiusPx": 4
+  },
+  "rotationArrow": {
+    "stroke": "#0ea5e9",
+    "fill": "#0ea5e9",
+    "lineWidth": 2,
+    "shaftLengthPx": 18,
+    "headLengthPx": 5,
+    "directionWithPositiveSpeed": -1
+  },
+  "crankArm": {
+    "stroke": "#475569",
+    "lineWidth": 5
+  },
+  "connectingRod": {
+    "stroke": "#f97316",
+    "lineWidth": 3
+  },
+  "crankPin": {
+    "fill": "#dc2626",
+    "radiusPx": 6
+  },
+  "sliderBlock": {
+    "fill": "#16a34a",
+    "horizontal": {
+      "widthPx": 28,
+      "heightPx": 22
+    },
+    "vertical": {
+      "widthPx": 22,
+      "heightPx": 28
+    }
+  }
+}
