@@ -20,17 +20,18 @@
           <button id="play-pause" type="button">Pause</button>
           <button id="reset-time" type="button">Reset time</button>
         </div>
+        <p class="controls-legend controls-legend--editable">Editable: these values are direct user inputs.</p>
         <label>
           Module m (shared across all gears)
-          <input id="shared-module" type="number" step="0.01" value="" placeholder="optional" />
+          <input id="shared-module" type="number" step="0.01" value="0.1" />
         </label>
         <label>
           Driver teeth z1
-          <input id="driver-teeth-z1" type="number" step="1" value="" placeholder="optional" />
+          <input id="driver-teeth-z1" type="number" step="1" value="18" />
         </label>
         <label>
           Driven teeth z2
-          <input id="driven-teeth-z2" type="number" step="1" value="" placeholder="optional" />
+          <input id="driven-teeth-z2" type="number" step="1" value="32" />
         </label>
         <label>
           Gear radius
@@ -53,7 +54,7 @@
           <input id="motor-rpm" type="number" step="1" value="17.2" />
         </label>
         <label>
-          Motor angular speed (rad/s, derived/advanced)
+          Manual angular speed (rad/s, used when RPM is blank)
           <input id="angular-speed" type="number" step="0.1" value="1.8" />
         </label>
         <label>
@@ -74,6 +75,23 @@
             <option value="light">Light</option>
           </select>
         </label>
+
+        <section class="derived-panel" aria-label="Derived read-only values">
+          <h3>Derived values (read only)</h3>
+          <p class="controls-legend controls-legend--derived">Read only: these are computed from the mechanism setup.</p>
+          <label>
+            Effective driver radius
+            <input id="derived-driver-radius" type="number" step="0.001" value="" readonly />
+          </label>
+          <label>
+            Effective driven radius
+            <input id="derived-gear-radius" type="number" step="0.001" value="" readonly />
+          </label>
+          <label>
+            Effective motor angular speed (rad/s)
+            <input id="derived-angular-speed" type="number" step="0.001" value="" readonly />
+          </label>
+        </section>
 
         <section class="selection-panel" aria-live="polite">
           <h2>Selection</h2>
