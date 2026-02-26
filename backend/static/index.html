@@ -20,52 +20,16 @@
           <button id="play-pause" type="button">Pause</button>
           <button id="reset-time" type="button">Reset time</button>
         </div>
-        <fieldset>
-          <legend>Legacy gear inputs (deprecated)</legend>
-          <label>
-            Driver module (deprecated alias of module)
-            <input
-              id="driver-module"
-              type="number"
-              step="0.01"
-              value=""
-              placeholder="read-only alias"
-              readonly
-            />
-          </label>
-          <label>
-            Driver teeth (deprecated alias of z1)
-            <input
-              id="driver-teeth"
-              type="number"
-              step="1"
-              value=""
-              placeholder="read-only alias"
-              readonly
-            />
-          </label>
-          <label>
-            Driven teeth (deprecated alias of z2)
-            <input
-              id="driven-teeth"
-              type="number"
-              step="1"
-              value=""
-              placeholder="read-only alias"
-              readonly
-            />
-          </label>
-        </fieldset>
         <label>
-          Module (canonical)
+          Module m (shared across all gears)
           <input id="shared-module" type="number" step="0.01" value="" placeholder="optional" />
         </label>
         <label>
-          Driver teeth z1 (canonical)
+          Driver teeth z1
           <input id="driver-teeth-z1" type="number" step="1" value="" placeholder="optional" />
         </label>
         <label>
-          Driven teeth z2 (canonical)
+          Driven teeth z2
           <input id="driven-teeth-z2" type="number" step="1" value="" placeholder="optional" />
         </label>
         <label>

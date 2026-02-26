@@ -3,33 +3,14 @@ export const MODULE_MATCH_TOLERANCE = 1e-9;
 export const CENTER_DISTANCE_TOLERANCE = 1e-6;
 
 export function validateGearParams(params) {
-  const driverModuleInput = params.raw_driver_module;
-  const sharedModuleInput = params.raw_shared_module;
+  const moduleInput = params.raw_module;
   const driverTeethInput = params.raw_driver_teeth;
   const drivenTeethInput = params.raw_driven_teeth;
 
-  if (Number.isFinite(driverModuleInput) && driverModuleInput <= 0) {
+  if (Number.isFinite(moduleInput) && moduleInput <= 0) {
     return {
       valid: false,
-      reason: "Driver module must be > 0",
-    };
-  }
-
-  if (Number.isFinite(sharedModuleInput) && sharedModuleInput <= 0) {
-    return {
-      valid: false,
-      reason: "Shared module must be > 0",
-    };
-  }
-
-  if (
-    Number.isFinite(driverModuleInput) &&
-    Number.isFinite(sharedModuleInput) &&
-    Math.abs(driverModuleInput - sharedModuleInput) > MODULE_MATCH_TOLERANCE
-  ) {
-    return {
-      valid: false,
-      reason: "Meshing gears must use the same module",
+      reason: "Module must be > 0",
     };
   }
 
