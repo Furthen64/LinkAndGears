@@ -116,9 +116,6 @@ function getControls() {
   return {
     play_pause: document.getElementById("play-pause"),
     reset_time: document.getElementById("reset-time"),
-    driver_module: document.getElementById("driver-module"),
-    driver_teeth: document.getElementById("driver-teeth"),
-    driven_teeth: document.getElementById("driven-teeth"),
     module: document.getElementById("shared-module"),
     z1: document.getElementById("driver-teeth-z1"),
     z2: document.getElementById("driven-teeth-z2"),
@@ -218,9 +215,6 @@ export function bootstrap() {
       module: parseOptionalNumber(controls.module),
       z1: parseOptionalNumber(controls.z1),
       z2: parseOptionalNumber(controls.z2),
-      deprecated_driver_module: parseOptionalNumber(controls.driver_module),
-      deprecated_driver_teeth: parseOptionalNumber(controls.driver_teeth),
-      deprecated_driven_teeth: parseOptionalNumber(controls.driven_teeth),
       gear_radius: Number(controls.gear_radius?.value ?? 1.6),
       driver_radius: Number(controls.driver_radius?.value ?? 0.9),
       crank_radius: Number(controls.crank_radius?.value ?? 1.2),
@@ -230,29 +224,6 @@ export function bootstrap() {
       slider_offset: Number(controls.slider_offset?.value ?? 0),
       slider_axis: controls.slider_axis?.value === "vertical" ? "vertical" : "horizontal",
     };
-
-    const conflicts = [];
-    const pairedFields = [
-      ["module", parsed.module, parsed.deprecated_driver_module, "module"],
-      ["z1", parsed.z1, parsed.deprecated_driver_teeth, "driver teeth"],
-      ["z2", parsed.z2, parsed.deprecated_driven_teeth, "driven teeth"],
-    ];
-
-    for (const [name, canonical, deprecated, label] of pairedFields) {
-      if (
-        canonical.present &&
-        deprecated.present &&
-        Number.isFinite(canonical.value) &&
-        Number.isFinite(deprecated.value) &&
-        canonical.value !== deprecated.value
-      ) {
-        conflicts.push(`${label}: canonical ${name}=${canonical.value} conflicts with deprecated value ${deprecated.value}`);
-      }
-    }
-
-    if (conflicts.length > 0) {
-      return { error: `Conflicting parameter inputs: ${conflicts.join("; ")}` };
-    }
 
     const usesCanonicalGearSet =
       Number.isFinite(parsed.module.value) &&
@@ -277,8 +248,7 @@ export function bootstrap() {
       params: {
         ...simulation.params,
         param_schema: CANONICAL_PARAM_SCHEMA,
-        raw_driver_module: parsed.deprecated_driver_module.value,
-        raw_shared_module: parsed.module.value,
+        raw_module: parsed.module.value,
         raw_driver_teeth: parsed.z1.value,
         raw_driven_teeth: parsed.z2.value,
         module: usesCanonicalGearSet ? parsed.module.value : Number.NaN,
@@ -311,17 +281,6 @@ export function bootstrap() {
       controls.angular_speed.value = normalization.angularSpeedFromRpm.toFixed(3);
     }
 
-    if (!simulation.normalizationError && controls.driver_module) {
-      controls.driver_module.value = controls.module?.value ?? "";
-    }
-
-    if (!simulation.normalizationError && controls.driver_teeth) {
-      controls.driver_teeth.value = controls.z1?.value ?? "";
-    }
-
-    if (!simulation.normalizationError && controls.driven_teeth) {
-      controls.driven_teeth.value = controls.z2?.value ?? "";
-    }
   }
 
   function updateSelectionPanel(state) {
