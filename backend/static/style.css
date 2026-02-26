@@ -64,3 +64,35 @@ body {
   font-size: 0.85rem;
   padding: 0.25rem 0.4rem;
 }
+
+.selection-panel {
+  margin-top: 0.35rem;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 0.6rem;
+}
+
+.selection-panel h2 {
+  margin-bottom: 0.4rem;
+}
+
+#selection-name {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+#selection-details {
+  margin: 0.4rem 0 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+#selection-details dt {
+  font-weight: 600;
+}
+
+#selection-details dd {
+  margin: 0;
+}
