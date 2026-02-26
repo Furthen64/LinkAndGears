@@ -11,10 +11,56 @@ body {
   color: #1f2937;
 }
 
-main {
-  text-align: center;
-  padding: 1.5rem;
+.layout {
+  display: grid;
+  grid-template-columns: 1fr 220px;
+  gap: 1rem;
+  align-items: start;
+  padding: 1rem;
+}
+
+.viewer-panel,
+.controls-panel {
   background: #ffffff;
   border: 1px solid #e5e7eb;
   border-radius: 0.5rem;
+  padding: 1rem;
+}
+
+.viewer-panel h1,
+.controls-panel h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+#mechanism-canvas {
+  width: 760px;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid #d1d5db;
+  border-radius: 0.25rem;
+  background: #fcfcff;
+}
+
+#status {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+.controls-panel {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.controls-panel label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.controls-panel input,
+.controls-panel select {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.25rem 0.4rem;
 }
