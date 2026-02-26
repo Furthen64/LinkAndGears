@@ -106,6 +106,83 @@
     }
   }
 
+  const MIN_PRACTICAL_TOOTH_COUNT = 6;
+  const MODULE_MATCH_TOLERANCE = 1e-9;
+  const CENTER_DISTANCE_TOLERANCE = 1e-6;
+
+  function validateGearParams(params) {
+    const driverModuleInput = params.raw_driver_module;
+    const sharedModuleInput = params.raw_shared_module;
+    const driverTeethInput = params.raw_driver_teeth;
+    const drivenTeethInput = params.raw_driven_teeth;
+
+    if (Number.isFinite(driverModuleInput) && driverModuleInput <= 0) {
+      return {
+        valid: false,
+        reason: "Driver module must be > 0",
+      };
+    }
+
+    if (Number.isFinite(sharedModuleInput) && sharedModuleInput <= 0) {
+      return {
+        valid: false,
+        reason: "Shared module must be > 0",
+      };
+    }
+
+    if (
+      Number.isFinite(driverModuleInput) &&
+      Number.isFinite(sharedModuleInput) &&
+      Math.abs(driverModuleInput - sharedModuleInput) > MODULE_MATCH_TOLERANCE
+    ) {
+      return {
+        valid: false,
+        reason: "Meshing gears must use the same module",
+      };
+    }
+
+    const toothChecks = [
+      ["Driver tooth count", driverTeethInput],
+      ["Driven tooth count", drivenTeethInput],
+    ];
+
+    for (const [label, count] of toothChecks) {
+      if (!Number.isFinite(count)) {
+        continue;
+      }
+
+      if (!Number.isInteger(count)) {
+        return {
+          valid: false,
+          reason: `${label} must be an integer`,
+        };
+      }
+
+      if (count < MIN_PRACTICAL_TOOTH_COUNT) {
+        return {
+          valid: false,
+          reason: `${label} must be >= ${MIN_PRACTICAL_TOOTH_COUNT}`,
+        };
+      }
+    }
+
+    if (
+      Number.isFinite(params.center_distance) &&
+      Number.isFinite(params.driver_radius) &&
+      Number.isFinite(params.gear_radius)
+    ) {
+      const expectedCenterDistance = params.driver_radius + params.gear_radius;
+      if (Math.abs(params.center_distance - expectedCenterDistance) > CENTER_DISTANCE_TOLERANCE) {
+        return {
+          valid: false,
+          reason: `Center distance mismatch: expected ${expectedCenterDistance.toFixed(3)} from pitch radii`,
+        };
+      }
+    }
+
+    return { valid: true };
+  }
+
   /**
    * Compute deterministic kinematic state for a gear-crank-slider mechanism.
    *
@@ -131,6 +208,19 @@
       crank_angle_offset = 0,
       driver_radius = 0,
     } = params;
+
+    const gearValidation = validateGearParams(params);
+    if (!gearValidation.valid) {
+      return {
+        valid: false,
+        invalidCategory: "constraint",
+        invalidReason: gearValidation.reason,
+        gear_angle: Number.NaN,
+        driver_angle: Number.NaN,
+        crank: { x: Number.NaN, y: Number.NaN },
+        slider: { x: Number.NaN, y: Number.NaN },
+      };
+    }
 
     if (!Number.isFinite(driver_radius) || driver_radius <= 0) {
       return {
@@ -795,6 +885,10 @@
 
       simulation.params = {
         ...simulation.params,
+        raw_driver_module: driverModule,
+        raw_shared_module: sharedModule,
+        raw_driver_teeth: driverToothCount,
+        raw_driven_teeth: drivenToothCount,
         module: usesRealGearParameters ? moduleValue : Number.NaN,
         driver_teeth: usesRealGearParameters ? driverToothCount : Number.NaN,
         driven_teeth: usesRealGearParameters ? drivenToothCount : Number.NaN,
@@ -848,9 +942,13 @@
 
       updateSelectionPanel(state);
 
+      const invalidPrefix = state.invalidCategory === "constraint"
+        ? "Invalid parameters"
+        : "Invalid geometry";
+
       status.textContent = state.valid
         ? `${simulation.isPlaying ? "Running" : "Paused"} (${simulation.params.slider_axis}) t=${simulation.timeSeconds.toFixed(2)}s`
-        : `Invalid geometry: ${state.invalidReason}`;
+        : `${invalidPrefix}: ${state.invalidReason}`;
     }
 
     function renderLoop(timestamp) {
@@ -948,7 +1046,7 @@
   }
 
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { computeState, deepMerge, DEFAULT_SCENE_TEMPLATE };
+    module.exports = { computeState, validateGearParams, deepMerge, DEFAULT_SCENE_TEMPLATE };
   }
 
   globalScope.computeState = computeState;
