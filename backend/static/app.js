@@ -16,6 +16,19 @@
       toothDepthFactor: 0.1,
       minToothDepthPx: 5,
     },
+    driverGear: {
+      stroke: "#0f766e",
+      fill: "#99f6e4",
+      lineWidth: 4,
+      toothStroke: "#115e59",
+      toothLineWidth: 3,
+      minToothCount: 8,
+      teethPerRadiusUnit: 12,
+      toothDepthFactor: 0.12,
+      minToothDepthPx: 4,
+      motorHubFill: "#042f2e",
+      motorHubRadiusPx: 3,
+    },
     centerMarker: {
       fill: "#0f172a",
       radiusPx: 4,
@@ -102,10 +115,11 @@
    *   valid: boolean,
    *   invalidReason?: string,
    *   gear_angle: number,
+   *   driver_angle: number,
    *   crank: {x:number, y:number},
    *   slider: {x:number, y:number}
    * }}
-   */
+  */
   function computeState(params, t) {
     const {
       initial_angle = 0,
@@ -115,9 +129,34 @@
       slider_axis = "horizontal",
       slider_offset = 0,
       crank_angle_offset = 0,
+      driver_radius = 0,
     } = params;
 
-    const theta = initial_angle + angular_speed * t + crank_angle_offset;
+    if (!Number.isFinite(driver_radius) || driver_radius <= 0) {
+      return {
+        valid: false,
+        invalidReason: "driver_radius must be a positive finite number",
+        gear_angle: Number.NaN,
+        driver_angle: Number.NaN,
+        crank: { x: Number.NaN, y: Number.NaN },
+        slider: { x: Number.NaN, y: Number.NaN },
+      };
+    }
+
+    if (!Number.isFinite(params.gear_radius) || params.gear_radius <= 0) {
+      return {
+        valid: false,
+        invalidReason: "gear_radius must be a positive finite number",
+        gear_angle: Number.NaN,
+        driver_angle: Number.NaN,
+        crank: { x: Number.NaN, y: Number.NaN },
+        slider: { x: Number.NaN, y: Number.NaN },
+      };
+    }
+
+    const driverTheta = initial_angle + angular_speed * t;
+    const drivenTheta = -(driverTheta * driver_radius) / params.gear_radius;
+    const theta = drivenTheta + crank_angle_offset;
 
     const crank = {
       x: crank_radius * Math.cos(theta),
@@ -126,7 +165,8 @@
 
     const baseState = {
       valid: true,
-      gear_angle: theta,
+      gear_angle: drivenTheta,
+      driver_angle: driverTheta,
       crank,
       slider: { x: 0, y: 0 },
     };
@@ -199,10 +239,12 @@
 
   function createTransform(canvas, params) {
     const maxLinkageReach = Math.abs(params.crank_radius) + Math.abs(params.rod_length);
+    const motorReach = Math.abs(params.gear_radius) + Math.abs(params.driver_radius) * 2;
     const extent =
       Math.max(
         1,
         Math.abs(params.gear_radius),
+        motorReach,
         maxLinkageReach,
         Math.abs(params.slider_offset)
       ) + 1;
@@ -275,6 +317,18 @@
       };
     }
 
+    if (selection === "motor") {
+      return {
+        title: "Motor gear",
+        details: [
+          ["Radius", formatValue(params.driver_radius)],
+          ["Angular speed", formatValue(params.angular_speed)],
+          ["Current angle", formatValue(state.driver_angle)],
+          ["Center", `(${formatValue(-(params.gear_radius + params.driver_radius))}, 0.000)`],
+        ],
+      };
+    }
+
     if (selection === "linkage") {
       return {
         title: "Linkage",
@@ -313,6 +367,8 @@
   function drawScene(ctx, canvas, params, state, scene, selectedObject) {
     const t = createTransform(canvas, params);
     const center = t.toCanvas({ x: 0, y: 0 });
+    const driverCenterWorld = { x: -(params.gear_radius + params.driver_radius), y: 0 };
+    const driverCenter = t.toCanvas(driverCenterWorld);
     const crank = t.toCanvas(state.crank);
     const slider = t.toCanvas(state.slider);
 
@@ -335,7 +391,53 @@
       ctx.stroke();
     }
 
-    // 2) gear body + rotating teeth
+    // 2) driving motor gear
+    const driverRadius = t.toCanvasLength(params.driver_radius);
+    const driverToothCount = Math.max(
+      scene.driverGear.minToothCount,
+      Math.round(params.driver_radius * scene.driverGear.teethPerRadiusUnit)
+    );
+    const driverToothDepth = Math.max(
+      scene.driverGear.minToothDepthPx,
+      driverRadius * scene.driverGear.toothDepthFactor
+    );
+
+    ctx.strokeStyle = scene.driverGear.toothStroke;
+    ctx.lineWidth = scene.driverGear.toothLineWidth;
+    for (let i = 0; i < driverToothCount; i += 1) {
+      const toothAngle = state.driver_angle + (i / driverToothCount) * Math.PI * 2;
+      const inner = {
+        x: driverCenter.x + Math.cos(toothAngle) * driverRadius,
+        y: driverCenter.y - Math.sin(toothAngle) * driverRadius,
+      };
+      const outer = {
+        x: driverCenter.x + Math.cos(toothAngle) * (driverRadius + driverToothDepth),
+        y: driverCenter.y - Math.sin(toothAngle) * (driverRadius + driverToothDepth),
+      };
+
+      ctx.beginPath();
+      ctx.moveTo(inner.x, inner.y);
+      ctx.lineTo(outer.x, outer.y);
+      ctx.stroke();
+    }
+
+    ctx.strokeStyle = scene.driverGear.stroke;
+    ctx.lineWidth = scene.driverGear.lineWidth;
+    ctx.beginPath();
+    ctx.arc(driverCenter.x, driverCenter.y, driverRadius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = scene.driverGear.fill;
+    ctx.beginPath();
+    ctx.arc(driverCenter.x, driverCenter.y, Math.max(1, driverRadius - 2), 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = scene.driverGear.motorHubFill;
+    ctx.beginPath();
+    ctx.arc(driverCenter.x, driverCenter.y, scene.driverGear.motorHubRadiusPx, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 3) large driven gear body + rotating teeth
     const gearCanvasRadius = t.toCanvasLength(params.gear_radius);
     const toothCount = Math.max(
       scene.gear.minToothCount,
@@ -427,7 +529,7 @@
     ctx.closePath();
     ctx.fill();
 
-    // 3) crank arm on the gear face (offset pin)
+    // 4) crank arm on the driven gear face (offset pin)
     ctx.strokeStyle = scene.crankArm.stroke;
     ctx.lineWidth = scene.crankArm.lineWidth;
     ctx.beginPath();
@@ -435,7 +537,7 @@
     ctx.lineTo(crank.x, crank.y);
     ctx.stroke();
 
-    // 4) connecting rod
+    // 5) connecting rod
     ctx.strokeStyle = scene.connectingRod.stroke;
     ctx.lineWidth = scene.connectingRod.lineWidth;
     ctx.beginPath();
@@ -443,13 +545,13 @@
     ctx.lineTo(slider.x, slider.y);
     ctx.stroke();
 
-    // 5) crank pin
+    // 6) crank pin
     ctx.fillStyle = scene.crankPin.fill;
     ctx.beginPath();
     ctx.arc(crank.x, crank.y, scene.crankPin.radiusPx, 0, Math.PI * 2);
     ctx.fill();
 
-    // 6) slider block
+    // 7) slider block
     ctx.fillStyle = scene.sliderBlock.fill;
     const sliderDimensions =
       params.slider_axis === "horizontal" ? scene.sliderBlock.horizontal : scene.sliderBlock.vertical;
@@ -462,7 +564,13 @@
 
     const selectionStroke = document.body?.dataset.theme === "light" ? "#111827" : "#f8fafc";
     const selectionWidth = 2;
-    if (selectedObject === "gear") {
+    if (selectedObject === "motor") {
+      ctx.strokeStyle = selectionStroke;
+      ctx.lineWidth = selectionWidth;
+      ctx.beginPath();
+      ctx.arc(driverCenter.x, driverCenter.y, driverRadius + driverToothDepth + 4, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (selectedObject === "gear") {
       ctx.strokeStyle = selectionStroke;
       ctx.lineWidth = selectionWidth;
       ctx.beginPath();
@@ -517,6 +625,15 @@
             point.x <= slider.x + sliderDimensions.widthPx / 2 &&
             point.y >= slider.y - sliderDimensions.heightPx / 2 &&
             point.y <= slider.y + sliderDimensions.heightPx / 2
+          );
+        },
+      },
+      {
+        name: "motor",
+        contains(point) {
+          return (
+            Math.hypot(point.x - driverCenter.x, point.y - driverCenter.y) <=
+            driverRadius + driverToothDepth + 4
           );
         },
       },
@@ -577,6 +694,7 @@
       reset_time: document.getElementById("reset-time"),
       gear_radius: document.getElementById("gear-radius"),
       crank_radius: document.getElementById("crank-radius"),
+      driver_radius: document.getElementById("driver-radius"),
       rod_length: document.getElementById("rod-length"),
       angular_speed: document.getElementById("angular-speed"),
       slider_offset: document.getElementById("slider-offset"),
@@ -597,6 +715,7 @@
         initial_angle: 0,
         crank_angle_offset: 0,
         gear_radius: 1.6,
+        driver_radius: 0.9,
         crank_radius: 1.2,
         rod_length: 3.2,
         angular_speed: 1.8,
@@ -617,6 +736,7 @@
       simulation.params = {
         ...simulation.params,
         gear_radius: Number(controls.gear_radius?.value ?? 1.6),
+        driver_radius: Number(controls.driver_radius?.value ?? 0.9),
         crank_radius: Number(controls.crank_radius?.value ?? 1.2),
         rod_length: Number(controls.rod_length?.value ?? 3.2),
         angular_speed: Number(controls.angular_speed?.value ?? 1.8),
@@ -697,6 +817,7 @@
     [
       controls.gear_radius,
       controls.crank_radius,
+      controls.driver_radius,
       controls.rod_length,
       controls.angular_speed,
       controls.slider_offset,
