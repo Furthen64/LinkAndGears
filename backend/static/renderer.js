@@ -69,10 +69,10 @@ export function objectDetails(selection, params, state) {
     return {
       title: "Gear",
       details: [
-        ["Radius", formatValue(params.gear_radius)],
+        ["Gear radius (canonical)", formatValue(params.gear_radius)],
         ["Driven pitch diameter", formatValue(params.driven_pitch_diameter)],
-        ["Module", formatValue(params.module)],
-        ["Driven teeth", formatValue(params.driven_teeth, 0)],
+        ["Module (canonical)", formatValue(params.module)],
+        ["Driven teeth z2 (canonical)", formatValue(params.driven_teeth, 0)],
         ["Motor speed (RPM)", formatValue(params.motor_rpm)],
         ["Angular speed (rad/s)", formatValue(params.angular_speed)],
         ["Current angle", formatValue(state.gear_angle)],
@@ -85,10 +85,10 @@ export function objectDetails(selection, params, state) {
     return {
       title: "Motor gear",
       details: [
-        ["Radius", formatValue(params.driver_radius)],
+        ["Driver radius (canonical)", formatValue(params.driver_radius)],
         ["Driver pitch diameter", formatValue(params.driver_pitch_diameter)],
-        ["Module", formatValue(params.module)],
-        ["Driver teeth", formatValue(params.driver_teeth, 0)],
+        ["Module (canonical)", formatValue(params.module)],
+        ["Driver teeth z1 (canonical)", formatValue(params.driver_teeth, 0)],
         ["Motor speed (RPM)", formatValue(params.motor_rpm)],
         ["Angular speed (rad/s)", formatValue(params.angular_speed)],
         ["Current angle", formatValue(state.driver_angle)],
@@ -101,10 +101,10 @@ export function objectDetails(selection, params, state) {
     return {
       title: "Linkage",
       details: [
-        ["Crank arm length", formatValue(currentCrankArmLength)],
-        ["Crank radius (configured)", formatValue(params.crank_radius)],
-        ["Rod length", formatValue(currentRodLength)],
-        ["Rod length (configured)", formatValue(params.rod_length)],
+        ["Crank radius (canonical)", formatValue(params.crank_radius)],
+        ["Crank arm length (actual)", formatValue(currentCrankArmLength)],
+        ["Rod length (canonical)", formatValue(params.rod_length)],
+        ["Rod length (actual)", formatValue(currentRodLength)],
         ["Crank pin", `(${formatValue(state.crank.x)}, ${formatValue(state.crank.y)})`],
         ["Slider joint", `(${formatValue(state.slider.x)}, ${formatValue(state.slider.y)})`],
       ],
