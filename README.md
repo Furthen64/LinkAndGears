@@ -8,3 +8,10 @@ This is **not a physics engine**. It is a **deterministic kinematic visualizer**
 The first version should be intentionally simple, correct, and extensible.
 
 See TASK.md
+## Run locally
+
+1. Install backend dependencies:
+   - `pip install fastapi uvicorn`
+2. Start the development server:
+   - `uvicorn backend.main:app --reload`
+3. Open `http://127.0.0.1:8000` in your browser.
