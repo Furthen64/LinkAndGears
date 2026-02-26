@@ -313,7 +313,8 @@
           ["Driven pitch diameter", formatValue(params.driven_pitch_diameter)],
           ["Module", formatValue(params.module)],
           ["Driven teeth", formatValue(params.driven_teeth, 0)],
-          ["Angular speed", formatValue(params.angular_speed)],
+          ["Motor speed (RPM)", formatValue(params.motor_rpm)],
+          ["Angular speed (rad/s)", formatValue(params.angular_speed)],
           ["Current angle", formatValue(state.gear_angle)],
           ["Center", "(0.000, 0.000)"],
         ],
@@ -328,7 +329,8 @@
           ["Driver pitch diameter", formatValue(params.driver_pitch_diameter)],
           ["Module", formatValue(params.module)],
           ["Driver teeth", formatValue(params.driver_teeth, 0)],
-          ["Angular speed", formatValue(params.angular_speed)],
+          ["Motor speed (RPM)", formatValue(params.motor_rpm)],
+          ["Angular speed (rad/s)", formatValue(params.angular_speed)],
           ["Current angle", formatValue(state.driver_angle)],
           ["Center", `(${formatValue(-(params.gear_radius + params.driver_radius))}, 0.000)`],
         ],
@@ -708,6 +710,7 @@
       crank_radius: document.getElementById("crank-radius"),
       driver_radius: document.getElementById("driver-radius"),
       rod_length: document.getElementById("rod-length"),
+      motor_rpm: document.getElementById("motor-rpm"),
       angular_speed: document.getElementById("angular-speed"),
       slider_offset: document.getElementById("slider-offset"),
       slider_axis: document.getElementById("slider-axis"),
@@ -735,6 +738,7 @@
         driver_radius: 0.9,
         crank_radius: 1.2,
         rod_length: 3.2,
+        motor_rpm: 17.2,
         angular_speed: 1.8,
         slider_offset: 0,
         slider_axis: "horizontal",
@@ -783,6 +787,11 @@
 
       const fallbackGearRadius = Number(controls.gear_radius?.value ?? 1.6);
       const fallbackDriverRadius = Number(controls.driver_radius?.value ?? 0.9);
+      const rpmInput = Number(controls.motor_rpm?.value ?? Number.NaN);
+      const angularSpeedInput = Number(controls.angular_speed?.value ?? 1.8);
+      const hasRpmInput = Number.isFinite(rpmInput);
+      const angularSpeedFromRpm = hasRpmInput ? (2 * Math.PI * rpmInput) / 60 : Number.NaN;
+      const angularSpeed = hasRpmInput ? angularSpeedFromRpm : angularSpeedInput;
 
       simulation.params = {
         ...simulation.params,
@@ -795,10 +804,15 @@
         driver_radius: usesRealGearParameters ? derivedDriverRadius : fallbackDriverRadius,
         crank_radius: Number(controls.crank_radius?.value ?? 1.2),
         rod_length: Number(controls.rod_length?.value ?? 3.2),
-        angular_speed: Number(controls.angular_speed?.value ?? 1.8),
+        motor_rpm: hasRpmInput ? rpmInput : Number.NaN,
+        angular_speed: angularSpeed,
         slider_offset: Number(controls.slider_offset?.value ?? 0),
         slider_axis: controls.slider_axis?.value === "vertical" ? "vertical" : "horizontal",
       };
+
+      if (controls.angular_speed && Number.isFinite(angularSpeedFromRpm)) {
+        controls.angular_speed.value = angularSpeedFromRpm.toFixed(3);
+      }
     }
 
     function updateSelectionPanel(state) {
