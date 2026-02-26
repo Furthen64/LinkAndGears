@@ -20,7 +20,6 @@
       rod_length,
       slider_axis = "horizontal",
       slider_offset = 0,
-      previous_slider = null,
       crank_angle_offset = 0,
     } = params;
 
@@ -63,13 +62,7 @@
       const candidateA = crank.x + root;
       const candidateB = crank.x - root;
 
-      const chosenX = chooseNearest(
-        candidateA,
-        candidateB,
-        previous_slider && Number.isFinite(previous_slider.x)
-          ? previous_slider.x
-          : candidateA
-      );
+      const chosenX = Math.max(candidateA, candidateB);
 
       return {
         ...baseState,
@@ -94,13 +87,7 @@
       const candidateA = crank.y + root;
       const candidateB = crank.y - root;
 
-      const chosenY = chooseNearest(
-        candidateA,
-        candidateB,
-        previous_slider && Number.isFinite(previous_slider.y)
-          ? previous_slider.y
-          : candidateA
-      );
+      const chosenY = Math.max(candidateA, candidateB);
 
       return {
         ...baseState,
@@ -114,17 +101,6 @@
       invalidReason: `Unsupported slider_axis: ${slider_axis}`,
       slider: { x: Number.NaN, y: Number.NaN },
     };
-  }
-
-  function chooseNearest(a, b, target) {
-    const distanceA = Math.abs(a - target);
-    const distanceB = Math.abs(b - target);
-
-    if (distanceA === distanceB) {
-      return a >= b ? a : b;
-    }
-
-    return distanceA < distanceB ? a : b;
   }
 
   function createTransform(canvas, params, state) {
@@ -276,6 +252,8 @@
     }
 
     const controls = {
+      play_pause: document.getElementById("play-pause"),
+      reset_time: document.getElementById("reset-time"),
       gear_radius: document.getElementById("gear-radius"),
       crank_radius: document.getElementById("crank-radius"),
       rod_length: document.getElementById("rod-length"),
@@ -284,43 +262,100 @@
       slider_axis: document.getElementById("slider-axis"),
     };
 
-    let previousSlider = null;
-    let lastTick = performance.now();
-    let elapsed = 0;
-
-    function currentParams() {
-      return {
+    const simulation = {
+      isPlaying: true,
+      timeSeconds: 0,
+      lastTimestamp: null,
+      params: {
         initial_angle: 0,
         crank_angle_offset: 0,
+        gear_radius: 1.6,
+        crank_radius: 1.2,
+        rod_length: 3.2,
+        angular_speed: 1.8,
+        slider_offset: 0,
+        slider_axis: "horizontal",
+      },
+    };
+
+    function syncParamsFromControls() {
+      simulation.params = {
+        ...simulation.params,
         gear_radius: Number(controls.gear_radius?.value ?? 1.6),
         crank_radius: Number(controls.crank_radius?.value ?? 1.2),
         rod_length: Number(controls.rod_length?.value ?? 3.2),
         angular_speed: Number(controls.angular_speed?.value ?? 1.8),
         slider_offset: Number(controls.slider_offset?.value ?? 0),
         slider_axis: controls.slider_axis?.value === "vertical" ? "vertical" : "horizontal",
-        previous_slider: previousSlider,
       };
     }
 
-    function render(now) {
-      const deltaS = (now - lastTick) / 1000;
-      lastTick = now;
-      elapsed += Math.max(0, Math.min(deltaS, 0.05));
+    function renderScene() {
+      const state = computeState(simulation.params, simulation.timeSeconds);
 
-      const params = currentParams();
-      const state = computeState(params, elapsed);
-      previousSlider = state.slider;
-
-      drawScene(ctx, canvas, params, state);
+      drawScene(ctx, canvas, simulation.params, state);
 
       status.textContent = state.valid
-        ? `Running (${params.slider_axis})`
+        ? `${simulation.isPlaying ? "Running" : "Paused"} (${simulation.params.slider_axis}) t=${simulation.timeSeconds.toFixed(2)}s`
         : `Invalid geometry: ${state.invalidReason}`;
-
-      requestAnimationFrame(render);
     }
 
-    requestAnimationFrame(render);
+    function renderLoop(timestamp) {
+      if (simulation.lastTimestamp == null) {
+        simulation.lastTimestamp = timestamp;
+      }
+
+      const deltaS = (timestamp - simulation.lastTimestamp) / 1000;
+      simulation.lastTimestamp = timestamp;
+
+      if (simulation.isPlaying) {
+        simulation.timeSeconds += Math.max(0, Math.min(deltaS, 0.05));
+      }
+
+      renderScene();
+
+      requestAnimationFrame(renderLoop);
+    }
+
+    function attachLiveUpdates(control) {
+      if (!control) {
+        return;
+      }
+
+      const handleInput = () => {
+        syncParamsFromControls();
+        renderScene();
+      };
+
+      control.addEventListener("input", handleInput);
+      control.addEventListener("change", handleInput);
+    }
+
+    [
+      controls.gear_radius,
+      controls.crank_radius,
+      controls.rod_length,
+      controls.angular_speed,
+      controls.slider_offset,
+      controls.slider_axis,
+    ].forEach(attachLiveUpdates);
+
+    controls.play_pause?.addEventListener("click", () => {
+      simulation.isPlaying = !simulation.isPlaying;
+      controls.play_pause.textContent = simulation.isPlaying ? "Pause" : "Play";
+      simulation.lastTimestamp = performance.now();
+      renderScene();
+    });
+
+    controls.reset_time?.addEventListener("click", () => {
+      simulation.timeSeconds = 0;
+      simulation.lastTimestamp = performance.now();
+      renderScene();
+    });
+
+    syncParamsFromControls();
+    renderScene();
+    requestAnimationFrame(renderLoop);
   }
 
   if (typeof module !== "undefined" && module.exports) {
