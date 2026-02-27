@@ -45,6 +45,7 @@ body {
 }
 
 .viewer-panel h1,
+.viewer-panel h2,
 .controls-panel h2 {
   margin: 0 0 0.75rem;
   font-size: 1.1rem;
@@ -57,6 +58,14 @@ body {
   border: 1px solid var(--canvas-border);
   border-radius: 0.25rem;
   background: var(--canvas-bg);
+}
+
+
+.selection-tip {
+  margin: 0.45rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--text) 72%, transparent);
 }
 
 #status {

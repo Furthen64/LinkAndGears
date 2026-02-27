@@ -209,7 +209,7 @@ export function bootstrap() {
     timeSeconds: 0,
     lastTimestamp: null,
     scene: DEFAULT_SCENE_TEMPLATE,
-    selectedObject: null,
+    selectedObject: "gear",
     hitRegions: [],
     params: {
       initial_angle: 0,

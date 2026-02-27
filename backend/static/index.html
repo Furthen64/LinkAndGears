@@ -11,6 +11,14 @@
       <section class="viewer-panel">
         <h1>LinkAndGears</h1>
         <canvas id="mechanism-canvas" width="760" height="460" aria-label="Gear and slider mechanism"></canvas>
+        <p class="selection-tip">Tip: click motor, gear, linkage, slider, or rail to inspect details.</p>
+
+        <section class="selection-panel" aria-live="polite">
+          <h2>Selection</h2>
+          <p id="selection-name">No object selected</p>
+          <dl id="selection-details"></dl>
+        </section>
+
         <p id="status">Ready.</p>
       </section>
 
@@ -94,11 +102,6 @@
           </label>
         </section>
 
-        <section class="selection-panel" aria-live="polite">
-          <h2>Selection</h2>
-          <p id="selection-name">No object selected</p>
-          <dl id="selection-details"></dl>
-        </section>
       </section>
     </main>
     <script type="module" src="/static/app.js"></script>
