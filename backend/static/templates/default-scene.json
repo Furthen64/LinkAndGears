@@ -7,7 +7,7 @@
   "gear": {
     "stroke": "#2563eb",
     "fill": "#dbeafe",
-    "lineWidth": 4,
+    "lineWidth": 2.5,
     "toothStroke": "#1d4ed8",
     "toothLineWidth": 3,
     "minToothCount": 10,
