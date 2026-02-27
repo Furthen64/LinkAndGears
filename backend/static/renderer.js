@@ -103,7 +103,13 @@ function drawGearBody(ctx, center, angle, geometry, style) {
   ctx.lineWidth = style.lineWidth;
   ctx.lineJoin = "round";
   ctx.fill();
+
+  // Keep the gear outline inside the tooth profile so the external silhouette
+  // stays readable for tooth meshing checks.
+  ctx.save();
+  ctx.clip();
   ctx.stroke();
+  ctx.restore();
 }
 
 function distanceToSegment(point, a, b) {

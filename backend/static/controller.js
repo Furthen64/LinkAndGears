@@ -10,7 +10,7 @@ export const DEFAULT_SCENE_TEMPLATE = {
   gear: {
     stroke: "#2563eb",
     fill: "#dbeafe",
-    lineWidth: 4,
+    lineWidth: 2.5,
     toothStroke: "#1d4ed8",
     toothLineWidth: 3,
     minToothCount: 10,
@@ -21,7 +21,7 @@ export const DEFAULT_SCENE_TEMPLATE = {
   driverGear: {
     stroke: "#0f766e",
     fill: "#99f6e4",
-    lineWidth: 4,
+    lineWidth: 2.5,
     toothStroke: "#115e59",
     toothLineWidth: 3,
     minToothCount: 8,
