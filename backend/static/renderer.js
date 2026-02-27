@@ -37,6 +37,75 @@ export function createTransform(canvas, params) {
   };
 }
 
+function clampToPositive(value, fallback = 1) {
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function getGearGeometry(radiusWorld, params, gearScene, t, toothCountOverride) {
+  const pitchRadiusPx = t.toCanvasLength(radiusWorld);
+  const moduleWorld = Number.isFinite(params.module) && params.module > 0 ? params.module : Number.NaN;
+  const fallbackToothCount = Math.max(
+    clampToPositive(gearScene.minToothCount, 8),
+    Math.round(radiusWorld * clampToPositive(gearScene.teethPerRadiusUnit, 8))
+  );
+  const toothCount = Number.isFinite(toothCountOverride) && toothCountOverride >= 4 ? toothCountOverride : fallbackToothCount;
+
+  const addendumWorld = Number.isFinite(moduleWorld)
+    ? moduleWorld
+    : radiusWorld * clampToPositive(gearScene.toothDepthFactor, 0.1) * 0.55;
+  const dedendumWorld = Number.isFinite(moduleWorld)
+    ? moduleWorld * 1.25
+    : radiusWorld * clampToPositive(gearScene.toothDepthFactor, 0.1) * 0.45;
+
+  const addendumPx = Math.max(clampToPositive(gearScene.minToothDepthPx, 3) * 0.45, t.toCanvasLength(addendumWorld));
+  const dedendumPx = Math.max(clampToPositive(gearScene.minToothDepthPx, 3) * 0.35, t.toCanvasLength(dedendumWorld));
+
+  return {
+    toothCount,
+    pitchRadiusPx,
+    tipRadiusPx: pitchRadiusPx + addendumPx,
+    rootRadiusPx: Math.max(2, pitchRadiusPx - dedendumPx),
+  };
+}
+
+function drawGearBody(ctx, center, angle, geometry, style) {
+  const halfToothAngle = Math.PI / geometry.toothCount;
+  const flankRatio = 0.38;
+
+  ctx.beginPath();
+  for (let i = 0; i < geometry.toothCount; i += 1) {
+    const toothCenter = angle + (i / geometry.toothCount) * Math.PI * 2;
+    const rootStart = toothCenter - halfToothAngle;
+    const tipStart = toothCenter - halfToothAngle * flankRatio;
+    const tipEnd = toothCenter + halfToothAngle * flankRatio;
+    const rootEnd = toothCenter + halfToothAngle;
+    const points = [
+      { radius: geometry.rootRadiusPx, theta: rootStart },
+      { radius: geometry.tipRadiusPx, theta: tipStart },
+      { radius: geometry.tipRadiusPx, theta: tipEnd },
+      { radius: geometry.rootRadiusPx, theta: rootEnd },
+    ];
+
+    points.forEach((point, pointIndex) => {
+      const px = center.x + Math.cos(point.theta) * point.radius;
+      const py = center.y - Math.sin(point.theta) * point.radius;
+      if (i === 0 && pointIndex === 0) {
+        ctx.moveTo(px, py);
+      } else {
+        ctx.lineTo(px, py);
+      }
+    });
+  }
+
+  ctx.closePath();
+  ctx.fillStyle = style.fill;
+  ctx.strokeStyle = style.stroke;
+  ctx.lineWidth = style.lineWidth;
+  ctx.lineJoin = "round";
+  ctx.fill();
+  ctx.stroke();
+}
+
 function distanceToSegment(point, a, b) {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
@@ -135,8 +204,9 @@ export function objectDetails(selection, params, state) {
 export function drawScene(ctx, canvas, params, state, scene, selectedObject, options = {}) {
   const t = createTransform(canvas, params);
   const center = t.toCanvas({ x: 0, y: 0 });
-  const driverCenterWorld = { x: -(params.gear_radius + params.driver_radius), y: 0 };
-  const driverCenter = t.toCanvas(driverCenterWorld);
+  const nominalCenterDistance = params.gear_radius + params.driver_radius;
+  const driverToothCount = Number.isFinite(params.driver_teeth) ? Math.max(4, Math.round(params.driver_teeth)) : null;
+  const drivenToothCount = Number.isFinite(params.driven_teeth) ? Math.max(4, Math.round(params.driven_teeth)) : null;
   const crank = t.toCanvas(state.crank);
   const slider = t.toCanvas(state.slider);
   const isLightTheme = options.theme === "light";
@@ -159,95 +229,19 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
     ctx.stroke();
   }
 
-  const driverRadius = t.toCanvasLength(params.driver_radius);
-  const driverToothCount = Math.max(
-    scene.driverGear.minToothCount,
-    Math.round(params.driver_radius * scene.driverGear.teethPerRadiusUnit)
-  );
-  const driverToothDepth = Math.max(
-    scene.driverGear.minToothDepthPx,
-    driverRadius * scene.driverGear.toothDepthFactor
-  );
+  const gearGeometry = getGearGeometry(params.gear_radius, params, scene.gear, t, drivenToothCount);
+  const driverGeometry = getGearGeometry(params.driver_radius, params, scene.driverGear, t, driverToothCount);
+  const driverCenter = t.toCanvas({ x: -nominalCenterDistance, y: 0 });
+  const driverToothPhaseOffset = Math.PI / driverGeometry.toothCount;
 
-  ctx.strokeStyle = scene.driverGear.toothStroke;
-  ctx.lineWidth = scene.driverGear.toothLineWidth;
-  for (let i = 0; i < driverToothCount; i += 1) {
-    const toothAngle = state.driver_angle + (i / driverToothCount) * Math.PI * 2;
-    const inner = {
-      x: driverCenter.x + Math.cos(toothAngle) * driverRadius,
-      y: driverCenter.y - Math.sin(toothAngle) * driverRadius,
-    };
-    const outer = {
-      x: driverCenter.x + Math.cos(toothAngle) * (driverRadius + driverToothDepth),
-      y: driverCenter.y - Math.sin(toothAngle) * (driverRadius + driverToothDepth),
-    };
-
-    ctx.beginPath();
-    ctx.moveTo(inner.x, inner.y);
-    ctx.lineTo(outer.x, outer.y);
-    ctx.stroke();
-  }
-
-  ctx.strokeStyle = scene.driverGear.stroke;
-  ctx.lineWidth = scene.driverGear.lineWidth;
-  ctx.beginPath();
-  ctx.arc(driverCenter.x, driverCenter.y, driverRadius, 0, Math.PI * 2);
-  ctx.stroke();
-
-  ctx.fillStyle = scene.driverGear.fill;
-  ctx.beginPath();
-  ctx.arc(driverCenter.x, driverCenter.y, Math.max(1, driverRadius - 2), 0, Math.PI * 2);
-  ctx.fill();
+  drawGearBody(ctx, driverCenter, state.driver_angle + driverToothPhaseOffset, driverGeometry, scene.driverGear);
 
   ctx.fillStyle = scene.driverGear.motorHubFill;
   ctx.beginPath();
   ctx.arc(driverCenter.x, driverCenter.y, scene.driverGear.motorHubRadiusPx, 0, Math.PI * 2);
   ctx.fill();
 
-  const gearCanvasRadius = t.toCanvasLength(params.gear_radius);
-  const toothCount = Math.max(
-    scene.gear.minToothCount,
-    Math.round(params.gear_radius * scene.gear.teethPerRadiusUnit)
-  );
-  const toothDepth = Math.max(
-    scene.gear.minToothDepthPx,
-    gearCanvasRadius * scene.gear.toothDepthFactor
-  );
-
-  ctx.strokeStyle = scene.gear.toothStroke;
-  ctx.lineWidth = scene.gear.toothLineWidth;
-  for (let i = 0; i < toothCount; i += 1) {
-    const toothAngle = state.gear_angle + (i / toothCount) * Math.PI * 2;
-    const inner = {
-      x: center.x + Math.cos(toothAngle) * gearCanvasRadius,
-      y: center.y - Math.sin(toothAngle) * gearCanvasRadius,
-    };
-    const outer = {
-      x: center.x + Math.cos(toothAngle) * (gearCanvasRadius + toothDepth),
-      y: center.y - Math.sin(toothAngle) * (gearCanvasRadius + toothDepth),
-    };
-
-    ctx.beginPath();
-    ctx.moveTo(inner.x, inner.y);
-    ctx.lineTo(outer.x, outer.y);
-    ctx.stroke();
-  }
-
-  ctx.strokeStyle = scene.gear.stroke;
-  ctx.lineWidth = scene.gear.lineWidth;
-  ctx.beginPath();
-  ctx.arc(center.x, center.y, gearCanvasRadius, 0, Math.PI * 2);
-  ctx.stroke();
-
-  ctx.fillStyle = scene.gear.fill;
-  ctx.beginPath();
-  ctx.arc(center.x, center.y, Math.max(1, gearCanvasRadius - 2), 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.strokeStyle = scene.gear.stroke;
-  ctx.beginPath();
-  ctx.arc(center.x, center.y, gearCanvasRadius, 0, Math.PI * 2);
-  ctx.stroke();
+  drawGearBody(ctx, center, state.gear_angle, gearGeometry, scene.gear);
 
   ctx.fillStyle = scene.centerMarker.fill;
   ctx.beginPath();
@@ -255,7 +249,7 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
   ctx.fill();
 
   const arrowAngle = state.gear_angle;
-  const arrowRadius = t.toCanvasLength(params.gear_radius);
+  const arrowRadius = gearGeometry.pitchRadiusPx;
   const arrowTail = {
     x: center.x + Math.cos(arrowAngle) * arrowRadius,
     y: center.y - Math.sin(arrowAngle) * arrowRadius,
@@ -329,13 +323,13 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
     ctx.strokeStyle = selectionStroke;
     ctx.lineWidth = selectionWidth;
     ctx.beginPath();
-    ctx.arc(driverCenter.x, driverCenter.y, driverRadius + driverToothDepth + 4, 0, Math.PI * 2);
+    ctx.arc(driverCenter.x, driverCenter.y, driverGeometry.tipRadiusPx + 4, 0, Math.PI * 2);
     ctx.stroke();
   } else if (selectedObject === "gear") {
     ctx.strokeStyle = selectionStroke;
     ctx.lineWidth = selectionWidth;
     ctx.beginPath();
-    ctx.arc(center.x, center.y, gearCanvasRadius + toothDepth + 4, 0, Math.PI * 2);
+    ctx.arc(center.x, center.y, gearGeometry.tipRadiusPx + 4, 0, Math.PI * 2);
     ctx.stroke();
   } else if (selectedObject === "linkage") {
     ctx.strokeStyle = selectionStroke;
@@ -394,7 +388,7 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
       contains(point) {
         return (
           Math.hypot(point.x - driverCenter.x, point.y - driverCenter.y) <=
-          driverRadius + driverToothDepth + 4
+          driverGeometry.tipRadiusPx + 4
         );
       },
     },
@@ -410,7 +404,7 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
     {
       name: "gear",
       contains(point) {
-        return Math.hypot(point.x - center.x, point.y - center.y) <= gearCanvasRadius + toothDepth + 4;
+        return Math.hypot(point.x - center.x, point.y - center.y) <= gearGeometry.tipRadiusPx + 4;
       },
     },
     {
