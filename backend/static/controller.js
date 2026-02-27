@@ -112,6 +112,42 @@ function getTheme() {
   return document.body?.dataset.theme === "light" ? "light" : "dark";
 }
 
+function applyInputConstraints(constraints) {
+  if (!constraints || typeof constraints !== "object") {
+    return;
+  }
+
+  Object.entries(constraints).forEach(([fieldId, attrs]) => {
+    const control = document.getElementById(fieldId);
+    if (!control || !attrs || typeof attrs !== "object") {
+      return;
+    }
+
+    ["min", "max", "step"].forEach((attrName) => {
+      if (attrs[attrName] != null) {
+        control.setAttribute(attrName, String(attrs[attrName]));
+      }
+    });
+  });
+}
+
+function resolveFieldNameFromReason(reason, constraints) {
+  if (typeof reason !== "string" || reason.length === 0 || !constraints || typeof constraints !== "object") {
+    return null;
+  }
+
+  const normalizedReason = reason.toLowerCase();
+
+  for (const [fieldId, fieldConstraints] of Object.entries(constraints)) {
+    const reasonIncludes = Array.isArray(fieldConstraints?.reasonIncludes) ? fieldConstraints.reasonIncludes : [];
+    if (reasonIncludes.some((entry) => normalizedReason.includes(String(entry).toLowerCase()))) {
+      return fieldId;
+    }
+  }
+
+  return normalizedReason.includes("slider_axis") ? "slider-axis" : null;
+}
+
 function getControls() {
   return {
     play_pause: document.getElementById("play-pause"),
@@ -339,10 +375,12 @@ export function bootstrap() {
     }
 
     const invalidPrefix = state.invalidCategory === "constraint" ? "Invalid parameters" : "Invalid geometry";
+    const invalidField = resolveFieldNameFromReason(state.invalidReason, simulation.scene.inputConstraints);
+    const invalidDetail = invalidField ? `[${invalidField}] ${state.invalidReason}` : state.invalidReason;
 
     status.textContent = state.valid
       ? `${simulation.isPlaying ? "Running" : "Paused"} (${simulation.params.slider_axis}) t=${simulation.timeSeconds.toFixed(2)}s`
-      : `${invalidPrefix}: ${state.invalidReason}`;
+      : `${invalidPrefix}: ${invalidDetail}`;
   }
 
   function renderLoop(timestamp) {
@@ -426,9 +464,11 @@ export function bootstrap() {
   });
 
   applyTheme(controls.theme_mode?.value);
+  applyInputConstraints(simulation.scene.inputConstraints);
   syncParamsFromControls();
   loadSceneTemplate("/static/templates/default-scene.json").then((scene) => {
     simulation.scene = scene;
+    applyInputConstraints(simulation.scene.inputConstraints);
     renderScene();
   });
 
