@@ -171,6 +171,7 @@ function getControls() {
     selection_details: document.getElementById("selection-details"),
     workspace_preset: document.getElementById("workspace-preset"),
     new_scene: document.getElementById("new-scene"),
+    save_scene_json: document.getElementById("save-scene-json"),
   };
 }
 
@@ -227,6 +228,24 @@ export function bootstrap() {
     "slider-offset": "0",
     "slider-axis": "horizontal",
     "theme-mode": "dark",
+  };
+  const SCENE_EXPORT_CONTROL_IDS = [
+    "shared-module",
+    "driver-teeth-z1",
+    "driven-teeth-z2",
+    "gear-radius",
+    "driver-radius",
+    "crank-radius",
+    "rod-length",
+    "motor-rpm",
+    "angular-speed",
+    "slider-offset",
+    "slider-axis",
+    "theme-mode",
+  ];
+  const EXPORT_META = {
+    app: "LinkAndGears",
+    version: "1.0.0",
   };
   const simulation = {
     isPlaying: true,
@@ -486,6 +505,46 @@ export function bootstrap() {
     renderScene();
   }
 
+  function buildCurrentSceneJson() {
+    const sceneConfig = {};
+
+    SCENE_EXPORT_CONTROL_IDS.forEach((controlId) => {
+      const control = document.getElementById(controlId);
+      if (!control) {
+        return;
+      }
+
+      sceneConfig[controlId] = String(control.value ?? "");
+    });
+
+    return sceneConfig;
+  }
+
+  function buildSceneExportPayload() {
+    return {
+      ...buildCurrentSceneJson(),
+      _meta: {
+        app: EXPORT_META.app,
+        version: EXPORT_META.version,
+        exportedAt: new Date().toISOString(),
+      },
+    };
+  }
+
+  function downloadSceneJson(payload) {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const link = document.createElement("a");
+    const timestamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*/, "").replace("T", "-");
+    const url = URL.createObjectURL(blob);
+
+    link.href = url;
+    link.download = `scene-${timestamp}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
   async function loadNewSceneBaseline() {
     if (typeof fetch !== "function") {
       return NEW_SCENE_FALLBACK;
@@ -577,6 +636,12 @@ export function bootstrap() {
     simulation.selectedObject = null;
     status.textContent = "New scene created.";
     applySceneConfig(baseline);
+  });
+
+  controls.save_scene_json?.addEventListener("click", () => {
+    const payload = buildSceneExportPayload();
+    downloadSceneJson(payload);
+    status.textContent = "Saved scene JSON";
   });
 
   canvas.addEventListener("click", (event) => {
