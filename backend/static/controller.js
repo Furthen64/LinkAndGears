@@ -170,6 +170,7 @@ function getControls() {
     selection_name: document.getElementById("selection-name"),
     selection_details: document.getElementById("selection-details"),
     workspace_preset: document.getElementById("workspace-preset"),
+    new_scene: document.getElementById("new-scene"),
   };
 }
 
@@ -212,6 +213,21 @@ export function bootstrap() {
     "vertical-slider": "/static/workspaces/vertical-slider.json",
   };
   const loadedWorkspacePresets = {};
+  const NEW_SCENE_BASELINE_PATH = "/static/workspaces/new-scene.json";
+  const NEW_SCENE_FALLBACK = {
+    "shared-module": "0.1",
+    "driver-teeth-z1": "18",
+    "driven-teeth-z2": "32",
+    "gear-radius": "1.6",
+    "driver-radius": "0.9",
+    "crank-radius": "1.2",
+    "rod-length": "3.2",
+    "motor-rpm": "17.2",
+    "angular-speed": "1.8",
+    "slider-offset": "0",
+    "slider-axis": "horizontal",
+    "theme-mode": "dark",
+  };
   const simulation = {
     isPlaying: true,
     timeSeconds: 0,
@@ -431,14 +447,26 @@ export function bootstrap() {
     }
   }
 
-  async function applyPreset(presetName) {
-    const preset = await loadPresetConfig(presetName);
-    if (!preset || typeof preset !== "object") {
+  function applySceneConfig(sceneConfig) {
+    if (!sceneConfig || typeof sceneConfig !== "object") {
       return;
     }
 
-    Object.entries(preset).forEach(([controlId, value]) => {
-      if (controlId === "theme-mode") {
+    [
+      "shared-module",
+      "driver-teeth-z1",
+      "driven-teeth-z2",
+      "gear-radius",
+      "driver-radius",
+      "crank-radius",
+      "rod-length",
+      "motor-rpm",
+      "angular-speed",
+      "slider-axis",
+      "slider-offset",
+    ].forEach((controlId) => {
+      const value = sceneConfig[controlId];
+      if (value == null) {
         return;
       }
 
@@ -450,12 +478,39 @@ export function bootstrap() {
       control.value = String(value);
     });
 
-    if (preset["theme-mode"] != null) {
-      applyTheme(preset["theme-mode"]);
+    if (sceneConfig["theme-mode"] != null) {
+      applyTheme(sceneConfig["theme-mode"]);
     }
 
     syncParamsFromControls();
     renderScene();
+  }
+
+  async function loadNewSceneBaseline() {
+    if (typeof fetch !== "function") {
+      return NEW_SCENE_FALLBACK;
+    }
+
+    try {
+      const response = await fetch(NEW_SCENE_BASELINE_PATH, { cache: "no-cache" });
+      if (!response.ok) {
+        return NEW_SCENE_FALLBACK;
+      }
+
+      const json = await response.json();
+      return typeof json === "object" && json ? json : NEW_SCENE_FALLBACK;
+    } catch {
+      return NEW_SCENE_FALLBACK;
+    }
+  }
+
+  async function applyPreset(presetName) {
+    const preset = await loadPresetConfig(presetName);
+    if (!preset || typeof preset !== "object") {
+      return;
+    }
+
+    applySceneConfig(preset);
   }
 
   function attachLiveUpdates(control) {
@@ -513,6 +568,15 @@ export function bootstrap() {
     simulation.timeSeconds = 0;
     simulation.lastTimestamp = performance.now();
     renderScene();
+  });
+
+  controls.new_scene?.addEventListener("click", async () => {
+    const baseline = await loadNewSceneBaseline();
+    simulation.timeSeconds = 0;
+    simulation.lastTimestamp = performance.now();
+    simulation.selectedObject = null;
+    status.textContent = "New scene created.";
+    applySceneConfig(baseline);
   });
 
   canvas.addEventListener("click", (event) => {
