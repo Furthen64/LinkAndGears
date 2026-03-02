@@ -169,6 +169,7 @@ function getControls() {
     derived_angular_speed: document.getElementById("derived-angular-speed"),
     selection_name: document.getElementById("selection-name"),
     selection_details: document.getElementById("selection-details"),
+    workspace_preset: document.getElementById("workspace-preset"),
   };
 }
 
@@ -204,6 +205,13 @@ export function bootstrap() {
       angular_speed: "angular-speed",
     },
   };
+  const WORKSPACE_PRESETS = {
+    default: "/static/workspaces/default.json",
+    "compact-fast": "/static/workspaces/compact-fast.json",
+    "large-slow": "/static/workspaces/large-slow.json",
+    "vertical-slider": "/static/workspaces/vertical-slider.json",
+  };
+  const loadedWorkspacePresets = {};
   const simulation = {
     isPlaying: true,
     timeSeconds: 0,
@@ -399,6 +407,57 @@ export function bootstrap() {
     requestAnimationFrame(renderLoop);
   }
 
+  async function loadPresetConfig(presetName) {
+    if (loadedWorkspacePresets[presetName]) {
+      return loadedWorkspacePresets[presetName];
+    }
+
+    const presetPath = WORKSPACE_PRESETS[presetName];
+    if (!presetPath || typeof fetch !== "function") {
+      return null;
+    }
+
+    try {
+      const response = await fetch(presetPath, { cache: "no-cache" });
+      if (!response.ok) {
+        return null;
+      }
+
+      const preset = await response.json();
+      loadedWorkspacePresets[presetName] = preset;
+      return preset;
+    } catch {
+      return null;
+    }
+  }
+
+  async function applyPreset(presetName) {
+    const preset = await loadPresetConfig(presetName);
+    if (!preset || typeof preset !== "object") {
+      return;
+    }
+
+    Object.entries(preset).forEach(([controlId, value]) => {
+      if (controlId === "theme-mode") {
+        return;
+      }
+
+      const control = document.getElementById(controlId);
+      if (!control) {
+        return;
+      }
+
+      control.value = String(value);
+    });
+
+    if (preset["theme-mode"] != null) {
+      applyTheme(preset["theme-mode"]);
+    }
+
+    syncParamsFromControls();
+    renderScene();
+  }
+
   function attachLiveUpdates(control) {
     if (!control) {
       return;
@@ -436,6 +495,13 @@ export function bootstrap() {
     renderScene();
   });
 
+  controls.workspace_preset?.addEventListener("input", () => {
+    void applyPreset(controls.workspace_preset.value);
+  });
+  controls.workspace_preset?.addEventListener("change", () => {
+    void applyPreset(controls.workspace_preset.value);
+  });
+
   controls.play_pause?.addEventListener("click", () => {
     simulation.isPlaying = !simulation.isPlaying;
     controls.play_pause.textContent = simulation.isPlaying ? "Pause" : "Play";
@@ -465,7 +531,7 @@ export function bootstrap() {
 
   applyTheme(controls.theme_mode?.value);
   applyInputConstraints(simulation.scene.inputConstraints);
-  syncParamsFromControls();
+  void applyPreset(controls.workspace_preset?.value ?? "default");
   loadSceneTemplate("/static/templates/default-scene.json").then((scene) => {
     simulation.scene = scene;
     applyInputConstraints(simulation.scene.inputConstraints);

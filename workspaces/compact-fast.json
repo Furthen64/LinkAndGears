@@ -1,0 +1,13 @@
+{
+  "shared-module": "0.08",
+  "driver-teeth-z1": "14",
+  "driven-teeth-z2": "20",
+  "gear-radius": "0.8",
+  "driver-radius": "0.56",
+  "crank-radius": "0.7",
+  "rod-length": "2.4",
+  "motor-rpm": "26",
+  "angular-speed": "2.6",
+  "slider-offset": "0.2",
+  "slider-axis": "horizontal"
+}
