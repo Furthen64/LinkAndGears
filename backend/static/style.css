@@ -51,6 +51,34 @@ body {
   font-size: 1.1rem;
 }
 
+.viewer-top-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.7rem;
+  margin: 0 0 0.65rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--divider);
+  border-radius: 0.35rem;
+}
+
+.viewer-top-controls label {
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.viewer-top-controls select {
+  font: inherit;
+  font-size: 0.84rem;
+  padding: 0.2rem 0.35rem;
+}
+
+.viewer-top-controls__help {
+  margin: 0;
+  font-size: 0.76rem;
+  color: color-mix(in srgb, var(--text) 75%, transparent);
+}
+
 #mechanism-canvas {
   width: 760px;
   max-width: 100%;
@@ -158,4 +186,16 @@ body {
 
 #selection-details dd {
   margin: 0;
+}
+
+@media (max-width: 640px) {
+  .viewer-top-controls {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .viewer-top-controls select {
+    width: 100%;
+  }
 }
