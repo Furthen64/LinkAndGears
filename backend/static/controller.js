@@ -60,6 +60,34 @@ export const DEFAULT_SCENE_TEMPLATE = {
     horizontal: { widthPx: 28, heightPx: 22 },
     vertical: { widthPx: 22, heightPx: 28 },
   },
+  grid: {
+    dark: {
+      visible: true,
+      minPixelSpacing: 30,
+      maxPixelSpacing: 80,
+      majorEvery: 5,
+      minorColor: "rgba(148, 163, 184, 0.16)",
+      majorColor: "rgba(148, 163, 184, 0.3)",
+      axisColor: "rgba(56, 189, 248, 0.5)",
+      minorLineWidth: 0.7,
+      majorLineWidth: 1.1,
+      axisLineWidth: 1.6,
+      showAxes: true,
+    },
+    light: {
+      visible: true,
+      minPixelSpacing: 30,
+      maxPixelSpacing: 80,
+      majorEvery: 5,
+      minorColor: "rgba(71, 85, 105, 0.11)",
+      majorColor: "rgba(51, 65, 85, 0.2)",
+      axisColor: "rgba(37, 99, 235, 0.45)",
+      minorLineWidth: 0.7,
+      majorLineWidth: 1.1,
+      axisLineWidth: 1.6,
+      showAxes: true,
+    },
+  },
 };
 
 export function deepMerge(base, override) {
