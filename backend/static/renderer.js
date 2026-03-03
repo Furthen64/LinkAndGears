@@ -1,4 +1,4 @@
-export function createTransform(canvas, params) {
+export function createTransform(canvas, params, camera = {}) {
   const maxLinkageReach = Math.abs(params.crank_radius) + Math.abs(params.rod_length);
   const motorReach = Math.abs(params.gear_radius) + Math.abs(params.driver_radius) * 2;
   const extent =
@@ -18,17 +18,32 @@ export function createTransform(canvas, params) {
   const worldHeight = worldMaxY - worldMinY;
   const padding = 26;
 
-  const scale = Math.min(
+  const baseScale = Math.min(
     (canvas.width - padding * 2) / worldWidth,
     (canvas.height - padding * 2) / worldHeight
   );
+  const zoom = Number.isFinite(camera.zoom) && camera.zoom > 0 ? camera.zoom : 1;
+  const panX = Number.isFinite(camera.panX) ? camera.panX : 0;
+  const panY = Number.isFinite(camera.panY) ? camera.panY : 0;
+  const scale = baseScale * zoom;
+  const canvasCenter = { x: canvas.width / 2, y: canvas.height / 2 };
 
   return {
+    baseScale,
+    zoom,
+    panX,
+    panY,
     scale,
     toCanvas(point) {
       return {
-        x: (point.x - worldMinX) * scale + padding,
-        y: (worldMaxY - point.y) * scale + padding,
+        x: (point.x - panX) * scale + canvasCenter.x,
+        y: (panY - point.y) * scale + canvasCenter.y,
+      };
+    },
+    toWorld(point) {
+      return {
+        x: panX + (point.x - canvasCenter.x) / scale,
+        y: panY - (point.y - canvasCenter.y) / scale,
       };
     },
     toCanvasLength(length) {
@@ -207,8 +222,8 @@ export function objectDetails(selection, params, state) {
   };
 }
 
-export function drawScene(ctx, canvas, params, state, scene, selectedObject, options = {}) {
-  const t = createTransform(canvas, params);
+export function drawScene(ctx, canvas, params, state, scene, selectedObject, options = {}, camera = {}) {
+  const t = createTransform(canvas, params, camera);
   const center = t.toCanvas({ x: 0, y: 0 });
   const nominalCenterDistance = params.gear_radius + params.driver_radius;
   const driverToothCount = Number.isFinite(params.driver_teeth) ? Math.max(4, Math.round(params.driver_teeth)) : null;
