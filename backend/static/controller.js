@@ -1,5 +1,5 @@
 import { computeState } from "./kinematics.js";
-import { drawScene, objectDetails } from "./renderer.js";
+import { createTransform, drawScene, objectDetails } from "./renderer.js";
 
 export const DEFAULT_SCENE_TEMPLATE = {
   rail: {
@@ -254,6 +254,13 @@ export function bootstrap() {
     scene: DEFAULT_SCENE_TEMPLATE,
     selectedObject: "gear",
     hitRegions: [],
+    camera: {
+      zoom: 1,
+      panX: 0,
+      panY: 0,
+      minZoom: 0.25,
+      maxZoom: 8,
+    },
     params: {
       initial_angle: 0,
       crank_angle_offset: 0,
@@ -273,6 +280,20 @@ export function bootstrap() {
     },
     normalizationError: null,
   };
+  let isCameraPanning = false;
+  let lastPanPoint = null;
+
+  function clampCameraZoom(zoom) {
+    const minZoom = Number.isFinite(simulation.camera.minZoom) ? simulation.camera.minZoom : 0.25;
+    const maxZoom = Number.isFinite(simulation.camera.maxZoom) ? simulation.camera.maxZoom : 8;
+    return Math.min(maxZoom, Math.max(minZoom, zoom));
+  }
+
+  function resetCamera() {
+    simulation.camera.zoom = 1;
+    simulation.camera.panX = 0;
+    simulation.camera.panY = 0;
+  }
 
   function applyTheme(theme) {
     const normalizedTheme = theme === "light" ? "light" : "dark";
@@ -407,7 +428,8 @@ export function bootstrap() {
       state,
       simulation.scene,
       simulation.selectedObject,
-      { theme: getTheme() }
+      { theme: getTheme() },
+      simulation.camera
     );
 
     updateSelectionPanel(state);
@@ -501,6 +523,7 @@ export function bootstrap() {
       applyTheme(sceneConfig["theme-mode"]);
     }
 
+    resetCamera();
     syncParamsFromControls();
     renderScene();
   }
@@ -645,6 +668,10 @@ export function bootstrap() {
   });
 
   canvas.addEventListener("click", (event) => {
+    if (isCameraPanning) {
+      return;
+    }
+
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
@@ -657,6 +684,78 @@ export function bootstrap() {
     simulation.selectedObject = matched ? matched.name : null;
     renderScene();
   });
+
+  canvas.addEventListener("wheel", (event) => {
+    event.preventDefault();
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const canvasPoint = {
+      x: (event.clientX - rect.left) * scaleX,
+      y: (event.clientY - rect.top) * scaleY,
+    };
+
+    const transformBefore = createTransform(canvas, simulation.params, simulation.camera);
+    const worldBefore = transformBefore.toWorld(canvasPoint);
+    const zoomFactor = Math.exp(-event.deltaY * 0.0015);
+    simulation.camera.zoom = clampCameraZoom(simulation.camera.zoom * zoomFactor);
+
+    const transformAfter = createTransform(canvas, simulation.params, simulation.camera);
+    const worldAfter = transformAfter.toWorld(canvasPoint);
+    simulation.camera.panX += worldBefore.x - worldAfter.x;
+    simulation.camera.panY += worldBefore.y - worldAfter.y;
+
+    renderScene();
+  });
+
+  canvas.addEventListener("mousedown", (event) => {
+    if (event.button !== 1 && event.button !== 2) {
+      return;
+    }
+
+    event.preventDefault();
+    isCameraPanning = true;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    lastPanPoint = {
+      x: (event.clientX - rect.left) * scaleX,
+      y: (event.clientY - rect.top) * scaleY,
+    };
+  });
+
+  canvas.addEventListener("mousemove", (event) => {
+    if (!isCameraPanning || !lastPanPoint) {
+      return;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const nextPoint = {
+      x: (event.clientX - rect.left) * scaleX,
+      y: (event.clientY - rect.top) * scaleY,
+    };
+
+    const transform = createTransform(canvas, simulation.params, simulation.camera);
+    if (transform.scale > 0) {
+      simulation.camera.panX -= (nextPoint.x - lastPanPoint.x) / transform.scale;
+      simulation.camera.panY += (nextPoint.y - lastPanPoint.y) / transform.scale;
+    }
+
+    lastPanPoint = nextPoint;
+    renderScene();
+  });
+
+  function stopCameraPan() {
+    isCameraPanning = false;
+    lastPanPoint = null;
+  }
+
+  canvas.addEventListener("mouseup", stopCameraPan);
+  canvas.addEventListener("mouseleave", stopCameraPan);
+  canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
   applyTheme(controls.theme_mode?.value);
   applyInputConstraints(simulation.scene.inputConstraints);
