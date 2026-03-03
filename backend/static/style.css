@@ -96,6 +96,13 @@ body {
   color: color-mix(in srgb, var(--text) 72%, transparent);
 }
 
+.camera-tip {
+  margin: 0.2rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  color: color-mix(in srgb, var(--text) 68%, transparent);
+}
+
 #status {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;

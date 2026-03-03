@@ -200,6 +200,7 @@ function getControls() {
     workspace_preset: document.getElementById("workspace-preset"),
     new_scene: document.getElementById("new-scene"),
     save_scene_json: document.getElementById("save-scene-json"),
+    reset_view: document.getElementById("reset-view"),
   };
 }
 
@@ -286,6 +287,8 @@ export function bootstrap() {
       zoom: 1,
       panX: 0,
       panY: 0,
+      basePanX: 0,
+      basePanY: 0,
       minZoom: 0.25,
       maxZoom: 8,
     },
@@ -310,6 +313,9 @@ export function bootstrap() {
   };
   let isCameraPanning = false;
   let lastPanPoint = null;
+  let activePanPointerId = null;
+  let didPanDrag = false;
+  let spacePressed = false;
 
   function clampCameraZoom(zoom) {
     const minZoom = Number.isFinite(simulation.camera.minZoom) ? simulation.camera.minZoom : 0.25;
@@ -319,8 +325,18 @@ export function bootstrap() {
 
   function resetCamera() {
     simulation.camera.zoom = 1;
-    simulation.camera.panX = 0;
-    simulation.camera.panY = 0;
+    simulation.camera.panX = Number.isFinite(simulation.camera.basePanX) ? simulation.camera.basePanX : 0;
+    simulation.camera.panY = Number.isFinite(simulation.camera.basePanY) ? simulation.camera.basePanY : 0;
+  }
+
+  function clampCameraPan() {
+    if (!Number.isFinite(simulation.camera.panX)) {
+      simulation.camera.panX = Number.isFinite(simulation.camera.basePanX) ? simulation.camera.basePanX : 0;
+    }
+
+    if (!Number.isFinite(simulation.camera.panY)) {
+      simulation.camera.panY = Number.isFinite(simulation.camera.basePanY) ? simulation.camera.basePanY : 0;
+    }
   }
 
   function applyTheme(theme) {
@@ -695,19 +711,34 @@ export function bootstrap() {
     status.textContent = "Saved scene JSON";
   });
 
-  canvas.addEventListener("click", (event) => {
-    if (isCameraPanning) {
-      return;
-    }
+  controls.reset_view?.addEventListener("click", () => {
+    resetCamera();
+    renderScene();
+  });
 
+  function getCanvasPointFromEvent(event) {
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
-    const point = {
+    return {
       x: (event.clientX - rect.left) * scaleX,
       y: (event.clientY - rect.top) * scaleY,
     };
+  }
 
+  function canStartPan(event) {
+    const isMiddleMouse = event.button === 1 || (event.buttons & 4) === 4;
+    const isSpaceDrag = spacePressed && (event.button === 0 || (event.buttons & 1) === 1);
+    return isMiddleMouse || isSpaceDrag;
+  }
+
+  canvas.addEventListener("click", (event) => {
+    if (isCameraPanning || didPanDrag) {
+      didPanDrag = false;
+      return;
+    }
+
+    const point = getCanvasPointFromEvent(event);
     const matched = simulation.hitRegions.find((region) => region.contains(point));
     simulation.selectedObject = matched ? matched.name : null;
     renderScene();
@@ -716,14 +747,7 @@ export function bootstrap() {
   canvas.addEventListener("wheel", (event) => {
     event.preventDefault();
 
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const canvasPoint = {
-      x: (event.clientX - rect.left) * scaleX,
-      y: (event.clientY - rect.top) * scaleY,
-    };
-
+    const canvasPoint = getCanvasPointFromEvent(event);
     const transformBefore = createTransform(canvas, simulation.params, simulation.camera);
     const worldBefore = transformBefore.toWorld(canvasPoint);
     const zoomFactor = Math.exp(-event.deltaY * 0.0015);
@@ -733,55 +757,80 @@ export function bootstrap() {
     const worldAfter = transformAfter.toWorld(canvasPoint);
     simulation.camera.panX += worldBefore.x - worldAfter.x;
     simulation.camera.panY += worldBefore.y - worldAfter.y;
+    clampCameraPan();
 
     renderScene();
-  });
+  }, { passive: false });
 
-  canvas.addEventListener("mousedown", (event) => {
-    if (event.button !== 1 && event.button !== 2) {
+  canvas.addEventListener("pointerdown", (event) => {
+    if (!canStartPan(event)) {
       return;
     }
 
     event.preventDefault();
     isCameraPanning = true;
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    lastPanPoint = {
-      x: (event.clientX - rect.left) * scaleX,
-      y: (event.clientY - rect.top) * scaleY,
-    };
+    didPanDrag = false;
+    activePanPointerId = event.pointerId;
+    lastPanPoint = getCanvasPointFromEvent(event);
+    canvas.setPointerCapture?.(event.pointerId);
   });
 
-  canvas.addEventListener("mousemove", (event) => {
-    if (!isCameraPanning || !lastPanPoint) {
+  canvas.addEventListener("pointermove", (event) => {
+    if (!isCameraPanning || !lastPanPoint || event.pointerId !== activePanPointerId) {
       return;
     }
 
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const nextPoint = {
-      x: (event.clientX - rect.left) * scaleX,
-      y: (event.clientY - rect.top) * scaleY,
-    };
+    const nextPoint = getCanvasPointFromEvent(event);
+    const deltaX = nextPoint.x - lastPanPoint.x;
+    const deltaY = nextPoint.y - lastPanPoint.y;
+    if (Math.abs(deltaX) > 1 || Math.abs(deltaY) > 1) {
+      didPanDrag = true;
+    }
 
     const transform = createTransform(canvas, simulation.params, simulation.camera);
     if (transform.scale > 0) {
-      simulation.camera.panX -= (nextPoint.x - lastPanPoint.x) / transform.scale;
-      simulation.camera.panY += (nextPoint.y - lastPanPoint.y) / transform.scale;
+      simulation.camera.panX -= deltaX / transform.scale;
+      simulation.camera.panY += deltaY / transform.scale;
+      clampCameraPan();
     }
 
     lastPanPoint = nextPoint;
     renderScene();
   });
 
-  function stopCameraPan() {
+  function stopCameraPan(event) {
+    if (event && activePanPointerId !== null && event.pointerId !== activePanPointerId) {
+      return;
+    }
+
+    if (event && activePanPointerId !== null) {
+      canvas.releasePointerCapture?.(activePanPointerId);
+    }
+
     isCameraPanning = false;
     lastPanPoint = null;
+    activePanPointerId = null;
   }
 
-  canvas.addEventListener("mouseup", stopCameraPan);
+  document.addEventListener("keydown", (event) => {
+    if (event.code === "Space") {
+      spacePressed = true;
+    }
+  });
+
+  document.addEventListener("keyup", (event) => {
+    if (event.code === "Space") {
+      spacePressed = false;
+    }
+  });
+
+  window.addEventListener("blur", () => {
+    spacePressed = false;
+    stopCameraPan();
+  });
+
+  canvas.addEventListener("pointerup", stopCameraPan);
+  canvas.addEventListener("pointercancel", stopCameraPan);
   canvas.addEventListener("mouseleave", stopCameraPan);
   canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
