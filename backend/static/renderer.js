@@ -144,6 +144,112 @@ function formatValue(value, digits = 3) {
   return Number.isFinite(value) ? value.toFixed(digits) : "N/A";
 }
 
+function chooseGridSpacing(scale, minPixels = 30, maxPixels = 80) {
+  const positiveScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
+  const targetPixels = (minPixels + maxPixels) / 2;
+  const targetWorld = targetPixels / positiveScale;
+  const exponent = Math.floor(Math.log10(targetWorld));
+  const power = 10 ** exponent;
+  const candidates = [1, 2, 5, 10]
+    .flatMap((factor) => [factor * power, factor * power * 10])
+    .filter((value) => value > 0);
+
+  let best = candidates[0] ?? 1;
+  let bestScore = Number.POSITIVE_INFINITY;
+  candidates.forEach((candidate) => {
+    const pixels = candidate * positiveScale;
+    let score = Math.abs(pixels - targetPixels);
+    if (pixels < minPixels) {
+      score += (minPixels - pixels) * 2;
+    }
+    if (pixels > maxPixels) {
+      score += (pixels - maxPixels) * 2;
+    }
+    if (score < bestScore) {
+      best = candidate;
+      bestScore = score;
+    }
+  });
+
+  return best;
+}
+
+function drawGrid(ctx, canvas, transform, options = {}) {
+  const grid = options.grid ?? {};
+  if (grid.visible === false || !Number.isFinite(transform.scale) || transform.scale <= 0) {
+    return;
+  }
+
+  const bottomLeft = transform.toWorld({ x: 0, y: canvas.height });
+  const topRight = transform.toWorld({ x: canvas.width, y: 0 });
+  const worldMinX = Math.min(bottomLeft.x, topRight.x);
+  const worldMaxX = Math.max(bottomLeft.x, topRight.x);
+  const worldMinY = Math.min(bottomLeft.y, topRight.y);
+  const worldMaxY = Math.max(bottomLeft.y, topRight.y);
+
+  const minorSpacing = chooseGridSpacing(transform.scale, grid.minPixelSpacing, grid.maxPixelSpacing);
+  const majorEvery = Number.isFinite(grid.majorEvery) && grid.majorEvery >= 2 ? Math.floor(grid.majorEvery) : 5;
+
+  const minorColor = grid.minorColor ?? "rgba(148, 163, 184, 0.22)";
+  const majorColor = grid.majorColor ?? "rgba(148, 163, 184, 0.4)";
+  const axisColor = grid.axisColor ?? "rgba(59, 130, 246, 0.55)";
+
+  const firstColumn = Math.floor(worldMinX / minorSpacing);
+  const lastColumn = Math.ceil(worldMaxX / minorSpacing);
+  const firstRow = Math.floor(worldMinY / minorSpacing);
+  const lastRow = Math.ceil(worldMaxY / minorSpacing);
+
+  const isMajorLine = (index) => ((index % majorEvery) + majorEvery) % majorEvery === 0;
+
+  ctx.save();
+  ctx.lineCap = "butt";
+  for (let column = firstColumn; column <= lastColumn; column += 1) {
+    const x = column * minorSpacing;
+    const canvasX = transform.toCanvas({ x, y: 0 }).x;
+    const isMajor = isMajorLine(column);
+    ctx.strokeStyle = isMajor ? majorColor : minorColor;
+    ctx.lineWidth = isMajor ? (grid.majorLineWidth ?? 1.1) : (grid.minorLineWidth ?? 0.7);
+    ctx.beginPath();
+    ctx.moveTo(canvasX, 0);
+    ctx.lineTo(canvasX, canvas.height);
+    ctx.stroke();
+  }
+
+  for (let row = firstRow; row <= lastRow; row += 1) {
+    const y = row * minorSpacing;
+    const canvasY = transform.toCanvas({ x: 0, y }).y;
+    const isMajor = isMajorLine(row);
+    ctx.strokeStyle = isMajor ? majorColor : minorColor;
+    ctx.lineWidth = isMajor ? (grid.majorLineWidth ?? 1.1) : (grid.minorLineWidth ?? 0.7);
+    ctx.beginPath();
+    ctx.moveTo(0, canvasY);
+    ctx.lineTo(canvas.width, canvasY);
+    ctx.stroke();
+  }
+
+  if (grid.showAxes !== false) {
+    if (worldMinX <= 0 && worldMaxX >= 0) {
+      const axisX = transform.toCanvas({ x: 0, y: 0 }).x;
+      ctx.strokeStyle = axisColor;
+      ctx.lineWidth = grid.axisLineWidth ?? 1.6;
+      ctx.beginPath();
+      ctx.moveTo(axisX, 0);
+      ctx.lineTo(axisX, canvas.height);
+      ctx.stroke();
+    }
+    if (worldMinY <= 0 && worldMaxY >= 0) {
+      const axisY = transform.toCanvas({ x: 0, y: 0 }).y;
+      ctx.strokeStyle = axisColor;
+      ctx.lineWidth = grid.axisLineWidth ?? 1.6;
+      ctx.beginPath();
+      ctx.moveTo(0, axisY);
+      ctx.lineTo(canvas.width, axisY);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
 export function objectDetails(selection, params, state) {
   const currentCrankArmLength = Math.hypot(state.crank.x, state.crank.y);
   const currentRodLength = Math.hypot(
@@ -231,8 +337,10 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
   const crank = t.toCanvas(state.crank);
   const slider = t.toCanvas(state.slider);
   const isLightTheme = options.theme === "light";
+  const gridPalette = isLightTheme ? scene.grid?.light : scene.grid?.dark;
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawGrid(ctx, canvas, t, { grid: gridPalette });
 
   ctx.strokeStyle = scene.rail.stroke;
   ctx.lineWidth = scene.rail.lineWidth;
