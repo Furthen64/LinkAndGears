@@ -10,11 +10,12 @@ The first version should be intentionally simple, correct, and extensible.
 See TASK.md
 ## Run locally
 
-1. Install backend dependencies:
-   - `pip install fastapi uvicorn`
-2. Start the development server:
-   - `uvicorn backend.main:app --reload`
-3. Open `http://127.0.0.1:8000` in your browser.
+1. Start the development server (uses a local `venv` virtual environment, no global install required):
+   - `./run-backend.sh`
+2. Open `http://127.0.0.1:8000` in your browser.
+
+Optional direct run (if you manage dependencies yourself):
+- `uvicorn backend.main:app --reload`
 
 
 ## Scene templates
