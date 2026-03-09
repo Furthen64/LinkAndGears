@@ -261,7 +261,7 @@ export function objectDetails(selection, params, state) {
     return { title: "No object selected", details: [] };
   }
 
-  if (selection === "gear") {
+  if (selection === "gear" || selection === "gear-1") {
     return {
       title: "Gear",
       details: [
@@ -277,7 +277,7 @@ export function objectDetails(selection, params, state) {
     };
   }
 
-  if (selection === "motor") {
+  if (selection === "motor" || selection === "motor-1") {
     return {
       title: "Motor gear",
       details: [
@@ -293,7 +293,7 @@ export function objectDetails(selection, params, state) {
     };
   }
 
-  if (selection === "linkage") {
+  if (selection === "linkage" || selection === "linkage-1") {
     return {
       title: "Linkage",
       details: [
@@ -307,7 +307,7 @@ export function objectDetails(selection, params, state) {
     };
   }
 
-  if (selection === "ground") {
+  if (selection === "ground" || selection === "ground-1") {
     return {
       title: "Ground",
       details: [
@@ -318,13 +318,20 @@ export function objectDetails(selection, params, state) {
     };
   }
 
+  if (selection === "slider" || selection === "slider-1") {
+    return {
+      title: "Slider",
+      details: [
+        ["Axis", params.slider_axis],
+        ["Offset", formatValue(params.slider_offset)],
+        ["Position", `(${formatValue(state.slider.x)}, ${formatValue(state.slider.y)})`],
+      ],
+    };
+  }
+
   return {
-    title: "Slider",
-    details: [
-      ["Axis", params.slider_axis],
-      ["Offset", formatValue(params.slider_offset)],
-      ["Position", `(${formatValue(state.slider.x)}, ${formatValue(state.slider.y)})`],
-    ],
+    title: `Scene node (${selection})`,
+    details: [["Status", "Added in scene tree (visual placement pending)"]],
   };
 }
 
@@ -448,19 +455,19 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
 
   const selectionStroke = isLightTheme ? "#111827" : "#f8fafc";
   const selectionWidth = 2;
-  if (selectedObject === "motor") {
+  if (selectedObject === "motor" || selectedObject === "motor-1") {
     ctx.strokeStyle = selectionStroke;
     ctx.lineWidth = selectionWidth;
     ctx.beginPath();
     ctx.arc(driverCenter.x, driverCenter.y, driverGeometry.tipRadiusPx + 4, 0, Math.PI * 2);
     ctx.stroke();
-  } else if (selectedObject === "gear") {
+  } else if (selectedObject === "gear" || selectedObject === "gear-1") {
     ctx.strokeStyle = selectionStroke;
     ctx.lineWidth = selectionWidth;
     ctx.beginPath();
     ctx.arc(center.x, center.y, gearGeometry.tipRadiusPx + 4, 0, Math.PI * 2);
     ctx.stroke();
-  } else if (selectedObject === "linkage") {
+  } else if (selectedObject === "linkage" || selectedObject === "linkage-1") {
     ctx.strokeStyle = selectionStroke;
     ctx.lineWidth = selectionWidth;
     ctx.beginPath();
@@ -468,7 +475,7 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
     ctx.lineTo(crank.x, crank.y);
     ctx.lineTo(slider.x, slider.y);
     ctx.stroke();
-  } else if (selectedObject === "ground") {
+  } else if (selectedObject === "ground" || selectedObject === "ground-1") {
     ctx.strokeStyle = selectionStroke;
     ctx.lineWidth = selectionWidth;
     ctx.setLineDash([6, 4]);
@@ -486,7 +493,7 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
       ctx.stroke();
     }
     ctx.setLineDash([]);
-  } else if (selectedObject === "slider") {
+  } else if (selectedObject === "slider" || selectedObject === "slider-1") {
     ctx.strokeStyle = selectionStroke;
     ctx.lineWidth = selectionWidth;
     ctx.strokeRect(
@@ -502,7 +509,7 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
 
   return [
     {
-      name: "slider",
+      id: "slider-1",
       contains(point) {
         return (
           point.x >= slider.x - sliderDimensions.widthPx / 2 &&
@@ -513,7 +520,7 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
       },
     },
     {
-      name: "motor",
+      id: "motor-1",
       contains(point) {
         return (
           Math.hypot(point.x - driverCenter.x, point.y - driverCenter.y) <=
@@ -522,7 +529,7 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
       },
     },
     {
-      name: "linkage",
+      id: "linkage-1",
       contains(point) {
         const closeToCrankArm = distanceToSegment(point, center, crank) <= linkageTolerance;
         const closeToRod = distanceToSegment(point, crank, slider) <= linkageTolerance;
@@ -531,13 +538,13 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
       },
     },
     {
-      name: "gear",
+      id: "gear-1",
       contains(point) {
         return Math.hypot(point.x - center.x, point.y - center.y) <= gearGeometry.tipRadiusPx + 4;
       },
     },
     {
-      name: "ground",
+      id: "ground-1",
       contains(point) {
         if (params.slider_axis === "horizontal") {
           const railY = t.toCanvas({ x: 0, y: params.slider_offset }).y;
