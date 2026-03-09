@@ -87,8 +87,14 @@ body.scene-tree-collapsed .layout {
   border-left: 1px dashed var(--divider);
 }
 
+.scene-tree__row {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
 .scene-tree__node {
-  width: 100%;
+  flex: 1;
   border: 1px solid transparent;
   background: transparent;
   color: var(--text);
@@ -105,6 +111,21 @@ body.scene-tree-collapsed .layout {
 .scene-tree__node[aria-selected="true"] {
   border-color: #2563eb;
   background: color-mix(in srgb, #2563eb 18%, transparent);
+}
+
+.scene-tree__delete {
+  border: 1px solid color-mix(in srgb, #dc2626 70%, var(--divider));
+  background: color-mix(in srgb, #dc2626 14%, transparent);
+  color: var(--text);
+  border-radius: 0.3rem;
+  padding: 0.18rem 0.4rem;
+  cursor: pointer;
+  font-size: 0.74rem;
+  line-height: 1.2;
+}
+
+.scene-tree__delete:hover {
+  background: color-mix(in srgb, #dc2626 20%, transparent);
 }
 
 body.scene-tree-collapsed .scene-tree-panel {

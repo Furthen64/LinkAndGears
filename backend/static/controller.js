@@ -352,9 +352,54 @@ export function bootstrap() {
     renderScene();
   }
 
+  function isDeletableTreeNode(nodeId) {
+    return /^gear-\d+$/.test(nodeId) || /^joint-\d+$/.test(nodeId);
+  }
+
+  function deleteTreeNodeById(nodeId) {
+    let removed = false;
+    const gearIndex = simulation.sceneGraph.extraGears.findIndex((node) => node.id === nodeId);
+    if (gearIndex >= 0) {
+      simulation.sceneGraph.extraGears.splice(gearIndex, 1);
+      removed = true;
+    }
+
+    const jointIndex = simulation.sceneGraph.extraJoints.findIndex((node) => node.id === nodeId);
+    if (jointIndex >= 0) {
+      simulation.sceneGraph.extraJoints.splice(jointIndex, 1);
+      removed = true;
+    }
+
+    if (!removed) {
+      return;
+    }
+
+    if (simulation.selectedObjectId === nodeId) {
+      simulation.selectedObjectId = "gear-1";
+    }
+
+    status.textContent = `Removed ${nodeId} from scene tree.`;
+    renderScene();
+  }
+
+  function getNextDynamicNodeIndex(prefix, nodes) {
+    const maxIndex = nodes.reduce((max, node) => {
+      const match = node.id.match(new RegExp(`^${prefix}-(\\d+)$`));
+      if (!match) {
+        return max;
+      }
+      return Math.max(max, Number(match[1]));
+    }, 1);
+
+    return maxIndex + 1;
+  }
+
   function createTreeNodeElement(node) {
     const li = document.createElement("li");
     li.setAttribute("role", "treeitem");
+
+    const nodeRow = document.createElement("div");
+    nodeRow.className = "scene-tree__row";
 
     const button = document.createElement("button");
     button.type = "button";
@@ -366,7 +411,23 @@ export function bootstrap() {
       selectObjectById(node.id);
     });
 
-    li.appendChild(button);
+    nodeRow.appendChild(button);
+
+    if (isDeletableTreeNode(node.id)) {
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "scene-tree__delete";
+      deleteButton.dataset.objectId = node.id;
+      deleteButton.setAttribute("aria-label", `Delete ${node.label}`);
+      deleteButton.textContent = "Delete";
+      deleteButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        deleteTreeNodeById(node.id);
+      });
+      nodeRow.appendChild(deleteButton);
+    }
+
+    li.appendChild(nodeRow);
 
     if (Array.isArray(node.children) && node.children.length > 0) {
       const childList = document.createElement("ul");
@@ -802,14 +863,14 @@ export function bootstrap() {
   });
 
   controls.add_gear?.addEventListener("click", () => {
-    const index = simulation.sceneGraph.extraGears.length + 2;
+    const index = getNextDynamicNodeIndex("gear", simulation.sceneGraph.extraGears);
     const id = `gear-${index}`;
     simulation.sceneGraph.extraGears.push({ id, label: `Gear${index}` });
     selectObjectById(id);
   });
 
   controls.add_joint?.addEventListener("click", () => {
-    const index = simulation.sceneGraph.extraJoints.length + 2;
+    const index = getNextDynamicNodeIndex("joint", simulation.sceneGraph.extraJoints);
     const id = `joint-${index}`;
     simulation.sceneGraph.extraJoints.push({ id, label: `Joint${index}` });
     selectObjectById(id);
