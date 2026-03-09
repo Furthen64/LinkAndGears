@@ -201,6 +201,11 @@ function getControls() {
     new_scene: document.getElementById("new-scene"),
     save_scene_json: document.getElementById("save-scene-json"),
     reset_view: document.getElementById("reset-view"),
+    scene_tree: document.getElementById("scene-tree"),
+    toggle_scene_tree: document.getElementById("toggle-scene-tree"),
+    scene_tree_content: document.getElementById("scene-tree-content"),
+    add_gear: document.getElementById("add-gear"),
+    add_joint: document.getElementById("add-joint"),
   };
 }
 
@@ -281,8 +286,12 @@ export function bootstrap() {
     timeSeconds: 0,
     lastTimestamp: null,
     scene: DEFAULT_SCENE_TEMPLATE,
-    selectedObject: "gear",
+    selectedObjectId: "gear-1",
     hitRegions: [],
+    sceneGraph: {
+      extraGears: [],
+      extraJoints: [],
+    },
     camera: {
       zoom: 1,
       panX: 0,
@@ -316,6 +325,68 @@ export function bootstrap() {
   let activePanPointerId = null;
   let didPanDrag = false;
   let spacePressed = false;
+
+  function makeNode(id, label, children = []) {
+    return { id, label, children };
+  }
+
+  function buildTreeModel() {
+    const extraGearNodes = simulation.sceneGraph.extraGears.map((node) => makeNode(node.id, node.label));
+    const extraJointNodes = simulation.sceneGraph.extraJoints.map((node) => makeNode(node.id, node.label));
+    return [
+      makeNode("motor-1", "Motor1", [
+        makeNode("gear-1", "Gear1", [
+          makeNode("linkage-1", "Linkage1", [
+            makeNode("slider-1", "Slider1"),
+            makeNode("ground-1", "Ground1"),
+            ...extraJointNodes,
+          ]),
+        ]),
+        ...extraGearNodes,
+      ]),
+    ];
+  }
+
+  function selectObjectById(objectId) {
+    simulation.selectedObjectId = objectId;
+    renderScene();
+  }
+
+  function createTreeNodeElement(node) {
+    const li = document.createElement("li");
+    li.setAttribute("role", "treeitem");
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "scene-tree__node";
+    button.dataset.objectId = node.id;
+    button.textContent = node.label;
+    button.setAttribute("aria-selected", String(simulation.selectedObjectId === node.id));
+    button.addEventListener("click", () => {
+      selectObjectById(node.id);
+    });
+
+    li.appendChild(button);
+
+    if (Array.isArray(node.children) && node.children.length > 0) {
+      const childList = document.createElement("ul");
+      childList.setAttribute("role", "group");
+      node.children.forEach((childNode) => childList.appendChild(createTreeNodeElement(childNode)));
+      li.appendChild(childList);
+    }
+
+    return li;
+  }
+
+  function renderSceneTree() {
+    if (!controls.scene_tree) {
+      return;
+    }
+
+    controls.scene_tree.innerHTML = "";
+    const model = buildTreeModel();
+    model.forEach((node) => controls.scene_tree.appendChild(createTreeNodeElement(node)));
+  }
 
   function clampCameraZoom(zoom) {
     const minZoom = Number.isFinite(simulation.camera.minZoom) ? simulation.camera.minZoom : 0.25;
@@ -448,7 +519,7 @@ export function bootstrap() {
       return;
     }
 
-    const data = objectDetails(simulation.selectedObject, simulation.params, state);
+    const data = objectDetails(simulation.selectedObjectId, simulation.params, state);
     controls.selection_name.textContent = data.title;
     controls.selection_details.innerHTML = "";
 
@@ -460,6 +531,8 @@ export function bootstrap() {
       controls.selection_details.appendChild(dt);
       controls.selection_details.appendChild(dd);
     });
+
+    renderSceneTree();
   }
 
   function renderScene() {
@@ -471,7 +544,7 @@ export function bootstrap() {
       simulation.params,
       state,
       simulation.scene,
-      simulation.selectedObject,
+      simulation.selectedObjectId,
       { theme: getTheme() },
       simulation.camera
     );
@@ -700,7 +773,9 @@ export function bootstrap() {
     const baseline = await loadNewSceneBaseline();
     simulation.timeSeconds = 0;
     simulation.lastTimestamp = performance.now();
-    simulation.selectedObject = null;
+    simulation.selectedObjectId = null;
+    simulation.sceneGraph.extraGears = [];
+    simulation.sceneGraph.extraJoints = [];
     status.textContent = "New scene created.";
     applySceneConfig(baseline);
   });
@@ -714,6 +789,30 @@ export function bootstrap() {
   controls.reset_view?.addEventListener("click", () => {
     resetCamera();
     renderScene();
+  });
+
+  controls.toggle_scene_tree?.addEventListener("click", () => {
+    const willCollapse = !document.body.classList.contains("scene-tree-collapsed");
+    document.body.classList.toggle("scene-tree-collapsed", willCollapse);
+    controls.toggle_scene_tree.textContent = willCollapse ? "Expand" : "Collapse";
+    controls.toggle_scene_tree.setAttribute("aria-expanded", String(!willCollapse));
+    if (controls.scene_tree_content) {
+      controls.scene_tree_content.hidden = willCollapse;
+    }
+  });
+
+  controls.add_gear?.addEventListener("click", () => {
+    const index = simulation.sceneGraph.extraGears.length + 2;
+    const id = `gear-${index}`;
+    simulation.sceneGraph.extraGears.push({ id, label: `Gear${index}` });
+    selectObjectById(id);
+  });
+
+  controls.add_joint?.addEventListener("click", () => {
+    const index = simulation.sceneGraph.extraJoints.length + 2;
+    const id = `joint-${index}`;
+    simulation.sceneGraph.extraJoints.push({ id, label: `Joint${index}` });
+    selectObjectById(id);
   });
 
   function getCanvasPointFromEvent(event) {
@@ -740,7 +839,7 @@ export function bootstrap() {
 
     const point = getCanvasPointFromEvent(event);
     const matched = simulation.hitRegions.find((region) => region.contains(point));
-    simulation.selectedObject = matched ? matched.name : null;
+    simulation.selectedObjectId = matched ? matched.id : null;
     renderScene();
   });
 
@@ -836,6 +935,7 @@ export function bootstrap() {
 
   applyTheme(controls.theme_mode?.value);
   applyInputConstraints(simulation.scene.inputConstraints);
+  renderSceneTree();
   void applyPreset(controls.workspace_preset?.value ?? "default");
   loadSceneTemplate("/static/templates/default-scene.json").then((scene) => {
     simulation.scene = scene;
