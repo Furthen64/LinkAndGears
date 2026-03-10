@@ -330,21 +330,118 @@ export function bootstrap() {
     return { id, label, children };
   }
 
+  function canonicalGearNodes() {
+    const centerDistance = simulation.params.driver_radius + simulation.params.gear_radius;
+    return {
+      "motor-1": {
+        id: "motor-1",
+        label: "Motor1",
+        center: { x: -centerDistance, y: 0 },
+        radius: simulation.params.driver_radius,
+      },
+      "gear-1": {
+        id: "gear-1",
+        label: "Gear1",
+        center: { x: 0, y: 0 },
+        radius: simulation.params.gear_radius,
+      },
+    };
+  }
+
+  function toPositiveFinite(value, fallback) {
+    return Number.isFinite(value) && value > 0 ? value : fallback;
+  }
+
+  function sanitizeExtraGearNode(rawNode, fallbackIndex = 1) {
+    const id = rawNode?.id ?? `gear-${fallbackIndex}`;
+    const label = rawNode?.label ?? `Gear${fallbackIndex}`;
+    const moduleValue = toPositiveFinite(Number(rawNode?.module), toPositiveFinite(simulation.params.module, 0.1));
+    const teethValue = Math.max(1, Math.round(toPositiveFinite(Number(rawNode?.teeth ?? rawNode?.toothCount), Number(controls.z2?.value) || 24)));
+    const providedRadius = Number(rawNode?.radius);
+    const derivedRadius = (moduleValue * teethValue) / 2;
+    const radiusValue = toPositiveFinite(providedRadius, derivedRadius);
+    const center = rawNode?.center ?? {};
+    return {
+      id,
+      label,
+      parentId: typeof rawNode?.parentId === "string" ? rawNode.parentId : null,
+      meshWith: typeof rawNode?.meshWith === "string" ? rawNode.meshWith : null,
+      module: moduleValue,
+      teeth: teethValue,
+      radius: radiusValue,
+      centerMode: rawNode?.centerMode === "manual" ? "manual" : "mesh",
+      center: {
+        x: Number.isFinite(center.x) ? center.x : 0,
+        y: Number.isFinite(center.y) ? center.y : 0,
+      },
+      linkageAnchor: rawNode?.linkageAnchor && typeof rawNode.linkageAnchor === "object"
+        ? {
+            x: Number.isFinite(rawNode.linkageAnchor.x) ? rawNode.linkageAnchor.x : 0,
+            y: Number.isFinite(rawNode.linkageAnchor.y) ? rawNode.linkageAnchor.y : 0,
+          }
+        : null,
+    };
+  }
+
+  function sanitizeExtraJointNode(rawNode, fallbackIndex = 1) {
+    return {
+      id: rawNode?.id ?? `joint-${fallbackIndex}`,
+      label: rawNode?.label ?? `Joint${fallbackIndex}`,
+      linkageAnchor: rawNode?.linkageAnchor && typeof rawNode.linkageAnchor === "object"
+        ? {
+            x: Number.isFinite(rawNode.linkageAnchor.x) ? rawNode.linkageAnchor.x : 0,
+            y: Number.isFinite(rawNode.linkageAnchor.y) ? rawNode.linkageAnchor.y : 0,
+          }
+        : null,
+    };
+  }
+
+  function applySceneGraphConfig(sceneConfig) {
+    const graph = sceneConfig?.sceneGraph ?? sceneConfig?.scene_graph ?? {};
+    const inputExtraGears = Array.isArray(graph.extraGears) ? graph.extraGears : [];
+    const inputExtraJoints = Array.isArray(graph.extraJoints) ? graph.extraJoints : [];
+    simulation.sceneGraph.extraGears = inputExtraGears.map((node, index) => sanitizeExtraGearNode(node, index + 2));
+    simulation.sceneGraph.extraJoints = inputExtraJoints.map((node, index) => sanitizeExtraJointNode(node, index + 1));
+  }
+
   function buildTreeModel() {
-    const extraGearNodes = simulation.sceneGraph.extraGears.map((node) => makeNode(node.id, node.label));
-    const extraJointNodes = simulation.sceneGraph.extraJoints.map((node) => makeNode(node.id, node.label));
-    return [
-      makeNode("motor-1", "Motor1", [
-        makeNode("gear-1", "Gear1", [
-          makeNode("linkage-1", "Linkage1", [
-            makeNode("slider-1", "Slider1"),
-            makeNode("ground-1", "Ground1"),
-            ...extraJointNodes,
-          ]),
+    const extraGearLookup = new Map();
+    simulation.sceneGraph.extraGears.forEach((node) => {
+      extraGearLookup.set(node.id, makeNode(node.id, node.label));
+    });
+
+    const rootNode = makeNode("motor-1", "Motor1", [
+      makeNode("gear-1", "Gear1", [
+        makeNode("linkage-1", "Linkage1", [
+          makeNode("slider-1", "Slider1"),
+          makeNode("ground-1", "Ground1"),
         ]),
-        ...extraGearNodes,
       ]),
+    ]);
+
+    const allGears = [
+      { id: "motor-1", children: rootNode.children },
+      { id: "gear-1", children: rootNode.children[0].children },
+      ...simulation.sceneGraph.extraGears.map((node) => ({
+        id: node.id,
+        children: extraGearLookup.get(node.id)?.children ?? [],
+      })),
     ];
+    const childrenById = new Map(allGears.map((node) => [node.id, node.children]));
+
+    simulation.sceneGraph.extraGears.forEach((node) => {
+      const childNode = extraGearLookup.get(node.id);
+      if (!childNode) {
+        return;
+      }
+      const parentId = node.meshWith ?? node.parentId ?? "motor-1";
+      const targetChildren = childrenById.get(parentId) ?? rootNode.children;
+      targetChildren.push(childNode);
+    });
+
+    const extraJointNodes = simulation.sceneGraph.extraJoints.map((node) => makeNode(node.id, node.label));
+    rootNode.children[0].children[0].children.push(...extraJointNodes);
+    return [rootNode];
   }
 
   function selectObjectById(objectId) {
@@ -553,7 +650,13 @@ export function bootstrap() {
     simulation.normalizationError = normalization.error ?? null;
 
     if (normalization.params) {
-      simulation.params = normalization.params;
+      simulation.params = {
+        ...normalization.params,
+        scene_graph: {
+          extraGears: simulation.sceneGraph.extraGears,
+          extraJoints: simulation.sceneGraph.extraJoints,
+        },
+      };
     }
 
     if (controls.derived_driver_radius) {
@@ -701,6 +804,8 @@ export function bootstrap() {
       applyTheme(sceneConfig["theme-mode"]);
     }
 
+    applySceneGraphConfig(sceneConfig);
+
     resetCamera();
     syncParamsFromControls();
     renderScene();
@@ -724,6 +829,10 @@ export function bootstrap() {
   function buildSceneExportPayload() {
     return {
       ...buildCurrentSceneJson(),
+      sceneGraph: {
+        extraGears: simulation.sceneGraph.extraGears,
+        extraJoints: simulation.sceneGraph.extraJoints,
+      },
       _meta: {
         app: EXPORT_META.app,
         version: EXPORT_META.version,
@@ -863,9 +972,43 @@ export function bootstrap() {
   });
 
   controls.add_gear?.addEventListener("click", () => {
+    syncParamsFromControls();
     const index = getNextDynamicNodeIndex("gear", simulation.sceneGraph.extraGears);
     const id = `gear-${index}`;
-    simulation.sceneGraph.extraGears.push({ id, label: `Gear${index}` });
+    const canonicalModule = toPositiveFinite(Number(controls.module?.value), toPositiveFinite(simulation.params.module, 0.1));
+    const canonicalDrivenTeeth = Math.max(1, Math.round(toPositiveFinite(Number(controls.z2?.value), 24)));
+    const radius = (canonicalModule * canonicalDrivenTeeth) / 2;
+    const selectedIsGear = typeof simulation.selectedObjectId === "string" && (simulation.selectedObjectId === "gear-1" || /^gear-\d+$/.test(simulation.selectedObjectId));
+
+    const gearLookup = {
+      ...canonicalGearNodes(),
+      ...Object.fromEntries(simulation.sceneGraph.extraGears.map((node) => [node.id, node])),
+    };
+
+    const relationTargetId = selectedIsGear ? simulation.selectedObjectId : "motor-1";
+    const relationTarget = gearLookup[relationTargetId] ?? gearLookup["motor-1"];
+    const center = selectedIsGear
+      ? {
+          x: relationTarget.center.x + relationTarget.radius + radius,
+          y: relationTarget.center.y,
+        }
+      : {
+          x: relationTarget.center.x,
+          y: relationTarget.center.y,
+        };
+
+    simulation.sceneGraph.extraGears.push({
+      id,
+      label: `Gear${index}`,
+      parentId: selectedIsGear ? null : "motor-1",
+      meshWith: selectedIsGear ? relationTargetId : null,
+      module: canonicalModule,
+      teeth: canonicalDrivenTeeth,
+      radius,
+      centerMode: selectedIsGear ? "mesh" : "parent",
+      center,
+      linkageAnchor: null,
+    });
     selectObjectById(id);
   });
 
