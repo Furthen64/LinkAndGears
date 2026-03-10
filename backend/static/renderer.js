@@ -127,6 +127,122 @@ function drawGearBody(ctx, center, angle, geometry, style) {
   ctx.restore();
 }
 
+function normalizeGearNode(rawNode, fallback, index = 0) {
+  const center = rawNode?.center ?? rawNode?.position ?? {};
+  return {
+    id: rawNode?.id ?? fallback.id,
+    center: {
+      x: Number.isFinite(center.x) ? center.x : fallback.center.x,
+      y: Number.isFinite(center.y) ? center.y : fallback.center.y,
+    },
+    radius: Number.isFinite(rawNode?.radius) && rawNode.radius > 0 ? rawNode.radius : fallback.radius,
+    toothCount: rawNode?.toothCount ?? rawNode?.teeth ?? fallback.toothCount,
+    angle: Number.isFinite(rawNode?.angle) ? rawNode.angle : fallback.angle,
+    angularSpeed: Number.isFinite(rawNode?.angularSpeed)
+      ? rawNode.angularSpeed
+      : Number.isFinite(rawNode?.omega)
+        ? rawNode.omega
+        : fallback.angularSpeed,
+    module: Number.isFinite(rawNode?.module) ? rawNode.module : fallback.module,
+    parentId: rawNode?.parentId ?? rawNode?.parent ?? null,
+    meshPartnerId: rawNode?.meshPartnerId ?? rawNode?.meshWith ?? null,
+    renderStyle: rawNode?.renderStyle ?? rawNode?.style ?? null,
+    role: rawNode?.role ?? fallback.role,
+    drawCenterMarker: rawNode?.drawCenterMarker ?? fallback.drawCenterMarker,
+    drawMotorHub: rawNode?.drawMotorHub ?? fallback.drawMotorHub,
+    zIndex: Number.isFinite(rawNode?.zIndex) ? rawNode.zIndex : index,
+  };
+}
+
+function computeGearNodes(params, state) {
+  const nominalCenterDistance = params.gear_radius + params.driver_radius;
+  const defaults = [
+    {
+      id: "motor-1",
+      center: { x: -nominalCenterDistance, y: 0 },
+      radius: params.driver_radius,
+      toothCount: params.driver_teeth,
+      angle: state.driver_angle,
+      angularSpeed: params.angular_speed,
+      module: params.module,
+      meshPartnerId: "gear-1",
+      parentId: null,
+      role: "driver",
+      drawMotorHub: true,
+      drawCenterMarker: false,
+    },
+    {
+      id: "gear-1",
+      center: { x: 0, y: 0 },
+      radius: params.gear_radius,
+      toothCount: params.driven_teeth,
+      angle: state.gear_angle,
+      angularSpeed: Number.isFinite(params.angular_speed) && Number.isFinite(params.driver_radius) && Number.isFinite(params.gear_radius) && params.gear_radius !== 0
+        ? -(params.angular_speed * params.driver_radius) / params.gear_radius
+        : Number.NaN,
+      module: params.module,
+      meshPartnerId: "motor-1",
+      parentId: "motor-1",
+      role: "driven",
+      drawMotorHub: false,
+      drawCenterMarker: true,
+    },
+  ];
+
+  const stateNodes = Array.isArray(state?.gearNodes)
+    ? state.gearNodes
+    : Array.isArray(state?.gear_nodes)
+      ? state.gear_nodes
+      : null;
+
+  if (!stateNodes || stateNodes.length === 0) {
+    return defaults;
+  }
+
+  return stateNodes.map((node, index) => {
+    const fallback = defaults.find((item) => item.id === node?.id) ?? {
+      ...defaults[1],
+      id: node?.id ?? `gear-${index + 1}`,
+      center: { x: 0, y: 0 },
+      radius: params.gear_radius,
+      toothCount: params.driven_teeth,
+      angle: state.gear_angle,
+      angularSpeed: Number.NaN,
+      parentId: null,
+      meshPartnerId: null,
+      role: "gear",
+      drawCenterMarker: false,
+      drawMotorHub: false,
+    };
+    return normalizeGearNode(node, fallback, index);
+  });
+}
+
+function drawGearNode(ctx, transform, params, scene, node) {
+  const style = node.renderStyle ?? (node.id === "motor-1" || node.role === "driver" ? scene.driverGear : scene.gear);
+  const geometry = getGearGeometry(node.radius, params, style, transform, node.toothCount);
+  const centerCanvas = transform.toCanvas(node.center);
+  const toothPhaseOffset = node.id === "motor-1" || node.role === "driver" ? Math.PI / geometry.toothCount : 0;
+
+  drawGearBody(ctx, centerCanvas, node.angle + toothPhaseOffset, geometry, style);
+
+  if (node.drawMotorHub) {
+    ctx.fillStyle = scene.driverGear.motorHubFill;
+    ctx.beginPath();
+    ctx.arc(centerCanvas.x, centerCanvas.y, scene.driverGear.motorHubRadiusPx, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (node.drawCenterMarker) {
+    ctx.fillStyle = scene.centerMarker.fill;
+    ctx.beginPath();
+    ctx.arc(centerCanvas.x, centerCanvas.y, scene.centerMarker.radiusPx, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  return { centerCanvas, geometry };
+}
+
 function distanceToSegment(point, a, b) {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
@@ -261,6 +377,24 @@ export function objectDetails(selection, params, state) {
     return { title: "No object selected", details: [] };
   }
 
+  const gearNodes = computeGearNodes(params, state);
+  const selectedGearNode = gearNodes.find((node) => node.id === selection);
+  if (selectedGearNode) {
+    const relation = selectedGearNode.parentId ?? selectedGearNode.meshPartnerId ?? "None";
+    return {
+      title: `Gear (${selectedGearNode.id})`,
+      details: [
+        ["Radius", formatValue(selectedGearNode.radius)],
+        ["Module", formatValue(selectedGearNode.module)],
+        ["Teeth", formatValue(selectedGearNode.toothCount, 0)],
+        ["Current angle", formatValue(selectedGearNode.angle)],
+        ["Angular speed (rad/s)", formatValue(selectedGearNode.angularSpeed)],
+        ["Center", `(${formatValue(selectedGearNode.center.x)}, ${formatValue(selectedGearNode.center.y)})`],
+        [selectedGearNode.parentId ? "Parent id" : "Mesh partner id", relation],
+      ],
+    };
+  }
+
   if (selection === "gear" || selection === "gear-1") {
     return {
       title: "Gear",
@@ -337,10 +471,7 @@ export function objectDetails(selection, params, state) {
 
 export function drawScene(ctx, canvas, params, state, scene, selectedObject, options = {}, camera = {}) {
   const t = createTransform(canvas, params, camera);
-  const center = t.toCanvas({ x: 0, y: 0 });
-  const nominalCenterDistance = params.gear_radius + params.driver_radius;
-  const driverToothCount = Number.isFinite(params.driver_teeth) ? Math.max(4, Math.round(params.driver_teeth)) : null;
-  const drivenToothCount = Number.isFinite(params.driven_teeth) ? Math.max(4, Math.round(params.driven_teeth)) : null;
+  const gearNodes = computeGearNodes(params, state).sort((a, b) => a.zIndex - b.zIndex);
   const crank = t.toCanvas(state.crank);
   const slider = t.toCanvas(state.slider);
   const isLightTheme = options.theme === "light";
@@ -365,33 +496,22 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
     ctx.stroke();
   }
 
-  const gearGeometry = getGearGeometry(params.gear_radius, params, scene.gear, t, drivenToothCount);
-  const driverGeometry = getGearGeometry(params.driver_radius, params, scene.driverGear, t, driverToothCount);
-  const driverCenter = t.toCanvas({ x: -nominalCenterDistance, y: 0 });
-  const driverToothPhaseOffset = Math.PI / driverGeometry.toothCount;
+  const renderedGears = gearNodes.map((node) => ({ node, ...drawGearNode(ctx, t, params, scene, node) }));
+  const drivenGear = renderedGears.find((entry) => entry.node.id === "gear-1")
+    ?? renderedGears.find((entry) => entry.node.role !== "driver")
+    ?? renderedGears[0];
+  const center = drivenGear?.centerCanvas ?? t.toCanvas({ x: 0, y: 0 });
+  const drivenGeometry = drivenGear?.geometry;
+  const drivenNode = drivenGear?.node;
 
-  drawGearBody(ctx, driverCenter, state.driver_angle + driverToothPhaseOffset, driverGeometry, scene.driverGear);
-
-  ctx.fillStyle = scene.driverGear.motorHubFill;
-  ctx.beginPath();
-  ctx.arc(driverCenter.x, driverCenter.y, scene.driverGear.motorHubRadiusPx, 0, Math.PI * 2);
-  ctx.fill();
-
-  drawGearBody(ctx, center, state.gear_angle, gearGeometry, scene.gear);
-
-  ctx.fillStyle = scene.centerMarker.fill;
-  ctx.beginPath();
-  ctx.arc(center.x, center.y, scene.centerMarker.radiusPx, 0, Math.PI * 2);
-  ctx.fill();
-
-  const arrowAngle = state.gear_angle;
-  const arrowRadius = gearGeometry.pitchRadiusPx;
+  const arrowAngle = Number.isFinite(drivenNode?.angle) ? drivenNode.angle : state.gear_angle;
+  const arrowRadius = drivenGeometry?.pitchRadiusPx ?? t.toCanvasLength(params.gear_radius);
   const arrowTail = {
     x: center.x + Math.cos(arrowAngle) * arrowRadius,
     y: center.y - Math.sin(arrowAngle) * arrowRadius,
   };
   const direction =
-    params.angular_speed >= 0
+    (Number.isFinite(drivenNode?.angularSpeed) ? drivenNode.angularSpeed : params.angular_speed) >= 0
       ? scene.rotationArrow.directionWithPositiveSpeed
       : -scene.rotationArrow.directionWithPositiveSpeed;
   const tangent = {
@@ -455,17 +575,14 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
 
   const selectionStroke = isLightTheme ? "#111827" : "#f8fafc";
   const selectionWidth = 2;
-  if (selectedObject === "motor" || selectedObject === "motor-1") {
+  const selectedGear = renderedGears.find(
+    (entry) => entry.node.id === selectedObject || (selectedObject === "motor" && entry.node.id === "motor-1")
+  );
+  if (selectedGear) {
     ctx.strokeStyle = selectionStroke;
     ctx.lineWidth = selectionWidth;
     ctx.beginPath();
-    ctx.arc(driverCenter.x, driverCenter.y, driverGeometry.tipRadiusPx + 4, 0, Math.PI * 2);
-    ctx.stroke();
-  } else if (selectedObject === "gear" || selectedObject === "gear-1") {
-    ctx.strokeStyle = selectionStroke;
-    ctx.lineWidth = selectionWidth;
-    ctx.beginPath();
-    ctx.arc(center.x, center.y, gearGeometry.tipRadiusPx + 4, 0, Math.PI * 2);
+    ctx.arc(selectedGear.centerCanvas.x, selectedGear.centerCanvas.y, selectedGear.geometry.tipRadiusPx + 4, 0, Math.PI * 2);
     ctx.stroke();
   } else if (selectedObject === "linkage" || selectedObject === "linkage-1") {
     ctx.strokeStyle = selectionStroke;
@@ -519,15 +636,12 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
         );
       },
     },
-    {
-      id: "motor-1",
+    ...renderedGears.map((entry) => ({
+      id: entry.node.id,
       contains(point) {
-        return (
-          Math.hypot(point.x - driverCenter.x, point.y - driverCenter.y) <=
-          driverGeometry.tipRadiusPx + 4
-        );
+        return Math.hypot(point.x - entry.centerCanvas.x, point.y - entry.centerCanvas.y) <= entry.geometry.tipRadiusPx + 4;
       },
-    },
+    })),
     {
       id: "linkage-1",
       contains(point) {
@@ -535,12 +649,6 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
         const closeToRod = distanceToSegment(point, crank, slider) <= linkageTolerance;
         const closeToPin = Math.hypot(point.x - crank.x, point.y - crank.y) <= scene.crankPin.radiusPx + 4;
         return closeToCrankArm || closeToRod || closeToPin;
-      },
-    },
-    {
-      id: "gear-1",
-      contains(point) {
-        return Math.hypot(point.x - center.x, point.y - center.y) <= gearGeometry.tipRadiusPx + 4;
       },
     },
     {
