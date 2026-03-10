@@ -294,23 +294,41 @@ export function computeState(params, t) {
     {
       gears: [
         {
-          id: "driver",
+          id: "motor-1",
           radius: driver_radius,
           angle: initial_angle,
           angularSpeed: angular_speed,
           center: { x: 0, y: 0 },
+          module: params.module,
+          toothCount: params.driver_teeth,
+          role: "driver",
         },
         {
-          id: "driven",
-          meshWith: "driver",
+          id: "gear-1",
+          meshWith: "motor-1",
           radius: params.gear_radius,
           angle: 0,
           phaseOffset: 0,
+          module: params.module,
+          toothCount: params.driven_teeth,
+          role: "driven",
           center: {
             x: Number.isFinite(center_distance) ? center_distance : driver_radius + params.gear_radius,
             y: 0,
           },
         },
+        ...((params.scene_graph?.extraGears ?? []).map((node) => ({
+          id: node.id,
+          angle: toFiniteNumber(node.angle, 0),
+          angularSpeed: node.angularSpeed,
+          module: node.module,
+          toothCount: node.teeth ?? node.toothCount,
+          radius: node.radius,
+          center: node.center,
+          meshWith: node.meshWith,
+          parentId: node.parentId,
+          role: "gear",
+        }))),
       ],
     },
     t,
@@ -330,9 +348,25 @@ export function computeState(params, t) {
     };
   }
 
-  const driverTheta = sceneState.gearsById.driver.angle;
-  const drivenTheta = sceneState.gearsById.driven.angle;
+  const driverTheta = sceneState.gearsById["motor-1"].angle;
+  const drivenTheta = sceneState.gearsById["gear-1"].angle;
   const theta = drivenTheta + crank_angle_offset;
+
+  const gearNodes = Object.values(sceneState.gearsById).map((node, index) => ({
+    id: node.id,
+    center: node.center,
+    radius: node.radius,
+    toothCount: node.toothCount,
+    angle: node.angle,
+    angularSpeed: node.angularSpeed,
+    module: node.module,
+    parentId: node.parentId ?? null,
+    meshPartnerId: node.meshWith ?? null,
+    role: node.role,
+    drawCenterMarker: node.id !== "motor-1",
+    drawMotorHub: node.id === "motor-1",
+    zIndex: index,
+  }));
 
   const crank = {
     x: crank_radius * Math.cos(theta),
@@ -344,6 +378,7 @@ export function computeState(params, t) {
     gear_angle: drivenTheta,
     driver_angle: driverTheta,
     gearsById: sceneState.gearsById,
+    gearNodes,
     jointsById: sceneState.jointsById,
     crank,
     slider: { x: 0, y: 0 },
