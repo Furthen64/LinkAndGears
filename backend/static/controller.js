@@ -370,7 +370,38 @@ export function bootstrap() {
     return {
       key: region.id.slice("placement-slot:".length),
       sourceGearId: region.sourceGearId,
+      direction:
+        region.direction && Number.isFinite(region.direction.x) && Number.isFinite(region.direction.y)
+          ? { x: region.direction.x, y: region.direction.y }
+          : null,
       center: { x: center.x, y: center.y },
+    };
+  }
+
+  function resolvePlacementCenterFromDirection(anchorGear, newGearRadius, slot) {
+    if (!anchorGear || !slot?.direction) {
+      return null;
+    }
+
+    const rawX = Number(slot.direction.x);
+    const rawY = Number(slot.direction.y);
+    if (!Number.isFinite(rawX) || !Number.isFinite(rawY)) {
+      return null;
+    }
+
+    const magnitude = Math.hypot(rawX, rawY);
+    if (!Number.isFinite(magnitude) || magnitude <= 0) {
+      return null;
+    }
+
+    const unitX = rawX / magnitude;
+    const unitY = rawY / magnitude;
+    const anchorRadius = toPositiveFinite(anchorGear.radius, toPositiveFinite(simulation.params.gear_radius, 0.1));
+    const centerDistance = Math.max(0.01, anchorRadius + toPositiveFinite(newGearRadius, 0.1));
+
+    return {
+      x: anchorGear.center.x + unitX * centerDistance,
+      y: anchorGear.center.y + unitY * centerDistance,
     };
   }
 
@@ -1067,9 +1098,10 @@ export function bootstrap() {
     const baseline = await loadNewSceneBaseline();
     simulation.timeSeconds = 0;
     simulation.lastTimestamp = performance.now();
-    simulation.selectedObjectId = null;
+    simulation.selectedObjectId = "gear-1";
     simulation.sceneGraph.extraGears = [];
     simulation.sceneGraph.extraJoints = [];
+    clearPendingGearSlot();
     status.textContent = "New scene created.";
     applySceneConfig(baseline);
   });
@@ -1114,11 +1146,9 @@ export function bootstrap() {
     const selectedGearFromSelection = selectedIsGear ? gearLookup[simulation.selectedObjectId] : null;
     const relationTarget = selectedGearFromSlot ?? selectedGearFromSelection ?? gearLookup["motor-1"];
     const shouldMesh = Boolean(relationTarget && relationTarget.id !== "motor-1");
-    const center = slot?.center && Number.isFinite(slot.center.x) && Number.isFinite(slot.center.y)
-      ? {
-          x: slot.center.x,
-          y: slot.center.y,
-        }
+    const meshCenterFromDirection = shouldMesh ? resolvePlacementCenterFromDirection(relationTarget, radius, slot) : null;
+    const center = meshCenterFromDirection
+      ? meshCenterFromDirection
       : shouldMesh
         ? {
             x: relationTarget.center.x + relationTarget.radius + radius,

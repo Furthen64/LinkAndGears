@@ -625,6 +625,7 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
       slotRegions.push({
         id: `placement-slot:${key}`,
         sourceGearId: selectedGear.node.id,
+        direction: unitDirection,
         centerWorld,
       });
     });
@@ -689,6 +690,7 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
     ...slotRegions.map((slotRegion) => ({
       id: slotRegion.id,
       sourceGearId: slotRegion.sourceGearId,
+      direction: slotRegion.direction,
       centerWorld: slotRegion.centerWorld,
       contains(point) {
         const slotCanvas = t.toCanvas(slotRegion.centerWorld);
