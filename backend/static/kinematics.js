@@ -290,6 +290,10 @@ export function computeState(params, t) {
     };
   }
 
+  const canonicalCenterDistance = Number.isFinite(center_distance)
+    ? center_distance
+    : driver_radius + params.gear_radius;
+
   const sceneState = computeSceneState(
     {
       gears: [
@@ -298,7 +302,7 @@ export function computeState(params, t) {
           radius: driver_radius,
           angle: initial_angle,
           angularSpeed: angular_speed,
-          center: { x: 0, y: 0 },
+          center: { x: -canonicalCenterDistance, y: 0 },
           module: params.module,
           toothCount: params.driver_teeth,
           role: "driver",
@@ -312,10 +316,7 @@ export function computeState(params, t) {
           module: params.module,
           toothCount: params.driven_teeth,
           role: "driven",
-          center: {
-            x: Number.isFinite(center_distance) ? center_distance : driver_radius + params.gear_radius,
-            y: 0,
-          },
+          center: { x: 0, y: 0 },
         },
         ...((params.scene_graph?.extraGears ?? []).map((node) => ({
           id: node.id,
