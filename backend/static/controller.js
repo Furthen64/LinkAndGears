@@ -599,8 +599,9 @@ export function bootstrap() {
     }
 
     let repairedCount = 0;
+    let fallbackAnchorId = null;
     if (deletedGear) {
-      const fallbackAnchorId = deletedGear.meshWith ?? deletedGear.parentId ?? "gear-1";
+      fallbackAnchorId = deletedGear.meshWith ?? deletedGear.parentId ?? "gear-1";
       const dependents = simulation.sceneGraph.extraGears.filter(
         (node) => node.meshWith === deletedGear.id || node.parentId === deletedGear.id,
       );
@@ -618,8 +619,9 @@ export function bootstrap() {
       });
 
       repairedCount += dependents.length;
-      repairedCount += keepGearMeshesSane(deletedGear.id, fallbackAnchor?.id ?? null);
     }
+
+    repairedCount += keepGearMeshesSane(deletedGear?.id ?? null, fallbackAnchorId);
 
     if (simulation.selectedObjectId === nodeId) {
       simulation.selectedObjectId = "gear-1";
