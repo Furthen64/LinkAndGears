@@ -301,6 +301,7 @@ export function bootstrap() {
       minZoom: 0.25,
       maxZoom: 8,
     },
+    pendingGearSlot: null,
     params: {
       initial_angle: 0,
       crank_angle_offset: 0,
@@ -350,6 +351,95 @@ export function bootstrap() {
 
   function toPositiveFinite(value, fallback) {
     return Number.isFinite(value) && value > 0 ? value : fallback;
+  }
+
+  function clearPendingGearSlot() {
+    simulation.pendingGearSlot = null;
+  }
+
+  function getPlacementSlotFromHitRegion(region) {
+    if (!region || typeof region.id !== "string" || !region.id.startsWith("placement-slot:")) {
+      return null;
+    }
+
+    const center = region.centerWorld;
+    if (!center || !Number.isFinite(center.x) || !Number.isFinite(center.y)) {
+      return null;
+    }
+
+    return {
+      key: region.id.slice("placement-slot:".length),
+      sourceGearId: region.sourceGearId,
+      center: { x: center.x, y: center.y },
+    };
+  }
+
+  function getGearLookup() {
+    return {
+      ...canonicalGearNodes(),
+      ...Object.fromEntries(simulation.sceneGraph.extraGears.map((node) => [node.id, node])),
+    };
+  }
+
+  function resolveMeshCenter(anchor, node, fallbackDirection = { x: 1, y: 0 }) {
+    if (!anchor || !node) {
+      return { x: 0, y: 0 };
+    }
+
+    const dx = Number.isFinite(node.center?.x) ? node.center.x - anchor.center.x : fallbackDirection.x;
+    const dy = Number.isFinite(node.center?.y) ? node.center.y - anchor.center.y : fallbackDirection.y;
+    const length = Math.hypot(dx, dy) || 1;
+    const unit = { x: dx / length, y: dy / length };
+    const distance = Math.max(0.01, toPositiveFinite(anchor.radius, 0.1) + toPositiveFinite(node.radius, 0.1));
+
+    return {
+      x: anchor.center.x + unit.x * distance,
+      y: anchor.center.y + unit.y * distance,
+    };
+  }
+
+  function keepGearMeshesSane(deletedNodeId = null, preferredAnchorId = null) {
+    const extraGears = simulation.sceneGraph.extraGears;
+    if (!Array.isArray(extraGears) || extraGears.length === 0) {
+      return 0;
+    }
+
+    const lookup = getGearLookup();
+    let updates = 0;
+
+    extraGears.forEach((node) => {
+      if (!node || typeof node.id !== "string") {
+        return;
+      }
+
+      const currentAnchorId = node.meshWith ?? node.parentId;
+      const anchorExists = typeof currentAnchorId === "string" && Boolean(lookup[currentAnchorId]);
+      if (anchorExists && currentAnchorId !== deletedNodeId) {
+        return;
+      }
+
+      const fallbackAnchorId =
+        preferredAnchorId && lookup[preferredAnchorId]
+          ? preferredAnchorId
+          : currentAnchorId === deletedNodeId && lookup["gear-1"]
+            ? "gear-1"
+            : lookup["gear-1"]
+              ? "gear-1"
+              : "motor-1";
+      const fallbackAnchor = lookup[fallbackAnchorId] ?? lookup["motor-1"];
+      if (!fallbackAnchor) {
+        return;
+      }
+
+      node.meshWith = fallbackAnchor.id;
+      node.parentId = null;
+      node.center = resolveMeshCenter(fallbackAnchor, node);
+      node.centerMode = "manual";
+      lookup[node.id] = node;
+      updates += 1;
+    });
+
+    return updates;
   }
 
   function sanitizeExtraGearNode(rawNode, fallbackIndex = 1) {
@@ -402,6 +492,8 @@ export function bootstrap() {
     const inputExtraJoints = Array.isArray(graph.extraJoints) ? graph.extraJoints : [];
     simulation.sceneGraph.extraGears = inputExtraGears.map((node, index) => sanitizeExtraGearNode(node, index + 2));
     simulation.sceneGraph.extraJoints = inputExtraJoints.map((node, index) => sanitizeExtraJointNode(node, index + 1));
+    keepGearMeshesSane();
+    clearPendingGearSlot();
   }
 
   function buildTreeModel() {
@@ -446,6 +538,7 @@ export function bootstrap() {
 
   function selectObjectById(objectId) {
     simulation.selectedObjectId = objectId;
+    clearPendingGearSlot();
     renderScene();
   }
 
@@ -455,8 +548,11 @@ export function bootstrap() {
 
   function deleteTreeNodeById(nodeId) {
     let removed = false;
+    let deletedGear = null;
+
     const gearIndex = simulation.sceneGraph.extraGears.findIndex((node) => node.id === nodeId);
     if (gearIndex >= 0) {
+      deletedGear = simulation.sceneGraph.extraGears[gearIndex];
       simulation.sceneGraph.extraGears.splice(gearIndex, 1);
       removed = true;
     }
@@ -471,11 +567,36 @@ export function bootstrap() {
       return;
     }
 
+    let repairedCount = 0;
+    if (deletedGear) {
+      const fallbackAnchorId = deletedGear.meshWith ?? deletedGear.parentId ?? "gear-1";
+      const dependents = simulation.sceneGraph.extraGears.filter(
+        (node) => node.meshWith === deletedGear.id || node.parentId === deletedGear.id,
+      );
+      const lookup = getGearLookup();
+      const fallbackAnchor = lookup[fallbackAnchorId] ?? lookup["gear-1"] ?? lookup["motor-1"];
+
+      dependents.forEach((node, index) => {
+        if (!fallbackAnchor) {
+          return;
+        }
+        node.meshWith = fallbackAnchor.id;
+        node.parentId = null;
+        node.center = resolveMeshCenter(fallbackAnchor, node, { x: 1, y: index % 2 === 0 ? 1 : -1 });
+        node.centerMode = "manual";
+      });
+
+      repairedCount += dependents.length;
+      repairedCount += keepGearMeshesSane(deletedGear.id, fallbackAnchor?.id ?? null);
+    }
+
     if (simulation.selectedObjectId === nodeId) {
       simulation.selectedObjectId = "gear-1";
     }
 
-    status.textContent = `Removed ${nodeId} from scene tree.`;
+    status.textContent = repairedCount > 0
+      ? `Removed ${nodeId}. Re-meshed ${repairedCount} gear${repairedCount === 1 ? "" : "s"}.`
+      : `Removed ${nodeId} from scene tree.`;
     renderScene();
   }
 
@@ -709,7 +830,10 @@ export function bootstrap() {
       state,
       simulation.scene,
       simulation.selectedObjectId,
-      { theme: getTheme() },
+      {
+        theme: getTheme(),
+        activeGearSlot: simulation.pendingGearSlot,
+      },
       simulation.camera
     );
 
@@ -985,30 +1109,39 @@ export function bootstrap() {
       ...Object.fromEntries(simulation.sceneGraph.extraGears.map((node) => [node.id, node])),
     };
 
-    const relationTargetId = selectedIsGear ? simulation.selectedObjectId : "motor-1";
-    const relationTarget = gearLookup[relationTargetId] ?? gearLookup["motor-1"];
-    const center = selectedIsGear
+    const slot = simulation.pendingGearSlot;
+    const selectedGearFromSlot = typeof slot?.sourceGearId === "string" ? gearLookup[slot.sourceGearId] : null;
+    const selectedGearFromSelection = selectedIsGear ? gearLookup[simulation.selectedObjectId] : null;
+    const relationTarget = selectedGearFromSlot ?? selectedGearFromSelection ?? gearLookup["motor-1"];
+    const shouldMesh = Boolean(relationTarget && relationTarget.id !== "motor-1");
+    const center = slot?.center && Number.isFinite(slot.center.x) && Number.isFinite(slot.center.y)
       ? {
-          x: relationTarget.center.x + relationTarget.radius + radius,
-          y: relationTarget.center.y,
+          x: slot.center.x,
+          y: slot.center.y,
         }
-      : {
-          x: relationTarget.center.x,
-          y: relationTarget.center.y,
-        };
+      : shouldMesh
+        ? {
+            x: relationTarget.center.x + relationTarget.radius + radius,
+            y: relationTarget.center.y,
+          }
+        : {
+            x: relationTarget.center.x,
+            y: relationTarget.center.y,
+          };
 
     simulation.sceneGraph.extraGears.push({
       id,
       label: `Gear${index}`,
-      parentId: selectedIsGear ? null : "motor-1",
-      meshWith: selectedIsGear ? relationTargetId : null,
+      parentId: shouldMesh ? null : "motor-1",
+      meshWith: shouldMesh ? relationTarget.id : null,
       module: canonicalModule,
       teeth: canonicalDrivenTeeth,
       radius,
-      centerMode: selectedIsGear ? "mesh" : "parent",
+      centerMode: shouldMesh ? "manual" : "parent",
       center,
       linkageAnchor: null,
     });
+    clearPendingGearSlot();
     selectObjectById(id);
   });
 
@@ -1043,6 +1176,16 @@ export function bootstrap() {
 
     const point = getCanvasPointFromEvent(event);
     const matched = simulation.hitRegions.find((region) => region.contains(point));
+    const matchedSlot = getPlacementSlotFromHitRegion(matched);
+
+    if (matchedSlot) {
+      simulation.pendingGearSlot = matchedSlot;
+      status.textContent = "Placement slot selected. Click Add Gear to create the new gear.";
+      renderScene();
+      return;
+    }
+
+    clearPendingGearSlot();
     simulation.selectedObjectId = matched ? matched.id : null;
     renderScene();
   });
