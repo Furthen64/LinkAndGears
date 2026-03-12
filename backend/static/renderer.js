@@ -575,15 +575,59 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
 
   const selectionStroke = isLightTheme ? "#111827" : "#f8fafc";
   const selectionWidth = 2;
+  const slotFill = isLightTheme ? "rgba(37, 99, 235, 0.2)" : "rgba(56, 189, 248, 0.24)";
+  const slotStroke = isLightTheme ? "#1d4ed8" : "#67e8f9";
+  const activeSlotFill = isLightTheme ? "rgba(14, 165, 233, 0.38)" : "rgba(34, 211, 238, 0.48)";
+  const activeSlotStroke = isLightTheme ? "#0c4a6e" : "#cffafe";
+  const slotRadiusPx = 9;
   const selectedGear = renderedGears.find(
     (entry) => entry.node.id === selectedObject || (selectedObject === "motor" && entry.node.id === "motor-1")
   );
+  const slotRegions = [];
   if (selectedGear) {
     ctx.strokeStyle = selectionStroke;
     ctx.lineWidth = selectionWidth;
     ctx.beginPath();
     ctx.arc(selectedGear.centerCanvas.x, selectedGear.centerCanvas.y, selectedGear.geometry.tipRadiusPx + 4, 0, Math.PI * 2);
     ctx.stroke();
+
+    const slotPlacementDistancePx = selectedGear.geometry.tipRadiusPx + slotRadiusPx + 8;
+    const slotDirections = [
+      { x: 1, y: 0 },
+      { x: 1, y: 1 },
+      { x: 0, y: 1 },
+      { x: -1, y: 1 },
+      { x: -1, y: 0 },
+      { x: -1, y: -1 },
+      { x: 0, y: -1 },
+      { x: 1, y: -1 },
+    ];
+
+    slotDirections.forEach((direction) => {
+      const magnitude = Math.hypot(direction.x, direction.y) || 1;
+      const unitDirection = { x: direction.x / magnitude, y: direction.y / magnitude };
+      const centerCanvas = {
+        x: selectedGear.centerCanvas.x + unitDirection.x * slotPlacementDistancePx,
+        y: selectedGear.centerCanvas.y - unitDirection.y * slotPlacementDistancePx,
+      };
+      const centerWorld = t.toWorld(centerCanvas);
+      const key = `${selectedGear.node.id}:${unitDirection.x.toFixed(3)}:${unitDirection.y.toFixed(3)}`;
+      const isActive = options?.activeGearSlot?.key === key;
+
+      ctx.fillStyle = isActive ? activeSlotFill : slotFill;
+      ctx.strokeStyle = isActive ? activeSlotStroke : slotStroke;
+      ctx.lineWidth = isActive ? 2.5 : 2;
+      ctx.beginPath();
+      ctx.arc(centerCanvas.x, centerCanvas.y, slotRadiusPx, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      slotRegions.push({
+        id: `placement-slot:${key}`,
+        sourceGearId: selectedGear.node.id,
+        centerWorld,
+      });
+    });
   } else if (selectedObject === "linkage" || selectedObject === "linkage-1") {
     ctx.strokeStyle = selectionStroke;
     ctx.lineWidth = selectionWidth;
@@ -640,6 +684,15 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
       id: entry.node.id,
       contains(point) {
         return Math.hypot(point.x - entry.centerCanvas.x, point.y - entry.centerCanvas.y) <= entry.geometry.tipRadiusPx + 4;
+      },
+    })),
+    ...slotRegions.map((slotRegion) => ({
+      id: slotRegion.id,
+      sourceGearId: slotRegion.sourceGearId,
+      centerWorld: slotRegion.centerWorld,
+      contains(point) {
+        const slotCanvas = t.toCanvas(slotRegion.centerWorld);
+        return Math.hypot(point.x - slotCanvas.x, point.y - slotCanvas.y) <= slotRadiusPx + 2;
       },
     })),
     {
