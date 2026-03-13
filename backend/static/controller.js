@@ -322,6 +322,7 @@ export function bootstrap() {
       slider_axis: "horizontal",
     },
     normalizationError: null,
+    sceneTreeDirty: true,
   };
   let isCameraPanning = false;
   let lastPanPoint = null;
@@ -549,6 +550,7 @@ export function bootstrap() {
     const inputExtraJoints = Array.isArray(graph.extraJoints) ? graph.extraJoints : [];
     simulation.sceneGraph.extraGears = inputExtraGears.map((node, index) => sanitizeExtraGearNode(node, index + 2));
     simulation.sceneGraph.extraJoints = inputExtraJoints.map((node, index) => sanitizeExtraJointNode(node, index + 1));
+    simulation.sceneTreeDirty = true;
     keepGearMeshesSane();
     clearPendingGearSlot();
   }
@@ -597,6 +599,16 @@ export function bootstrap() {
     simulation.selectedObjectId = objectId;
     clearPendingGearSlot();
     renderScene();
+  }
+
+  function updateSceneTreeSelection() {
+    if (!controls.scene_tree) {
+      return;
+    }
+
+    controls.scene_tree.querySelectorAll(".scene-tree__node").forEach((nodeButton) => {
+      nodeButton.setAttribute("aria-selected", String(nodeButton.dataset.objectId === simulation.selectedObjectId));
+    });
   }
 
   function isDeletableTreeNode(nodeId) {
@@ -652,6 +664,8 @@ export function bootstrap() {
     if (simulation.selectedObjectId === nodeId) {
       simulation.selectedObjectId = "gear-1";
     }
+
+    simulation.sceneTreeDirty = true;
 
     const removalMessage = repairedCount > 0
       ? `Removed ${nodeId}. Re-meshed ${repairedCount} gear${repairedCount === 1 ? "" : "s"}.`
@@ -727,6 +741,7 @@ export function bootstrap() {
     controls.scene_tree.innerHTML = "";
     const model = buildTreeModel();
     model.forEach((node) => controls.scene_tree.appendChild(createTreeNodeElement(node)));
+    simulation.sceneTreeDirty = false;
   }
 
   function clampCameraZoom(zoom) {
@@ -879,7 +894,12 @@ export function bootstrap() {
       controls.selection_details.appendChild(dd);
     });
 
-    renderSceneTree();
+    if (simulation.sceneTreeDirty) {
+      renderSceneTree();
+      return;
+    }
+
+    updateSceneTreeSelection();
   }
 
   function renderScene() {
@@ -1141,6 +1161,7 @@ export function bootstrap() {
     simulation.selectedObjectId = "gear-1";
     simulation.sceneGraph.extraGears = [];
     simulation.sceneGraph.extraJoints = [];
+    simulation.sceneTreeDirty = true;
     clearPendingGearSlot();
     setStatusMessage("New scene created.", {
       debug: `Loaded baseline workspace from ${NEW_SCENE_BASELINE_PATH}.`,
@@ -1215,6 +1236,7 @@ export function bootstrap() {
       center,
       linkageAnchor: null,
     });
+    simulation.sceneTreeDirty = true;
     clearPendingGearSlot();
     selectObjectById(id);
   });
@@ -1223,6 +1245,7 @@ export function bootstrap() {
     const index = getNextDynamicNodeIndex("joint", simulation.sceneGraph.extraJoints);
     const id = `joint-${index}`;
     simulation.sceneGraph.extraJoints.push({ id, label: `Joint${index}` });
+    simulation.sceneTreeDirty = true;
     selectObjectById(id);
   });
 
