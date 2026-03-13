@@ -204,6 +204,36 @@ body.scene-tree-collapsed .scene-tree-panel {
   font-size: 0.9rem;
 }
 
+.debug-panel {
+  margin: 0.45rem 0 0;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--divider);
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, var(--panel-bg) 75%, black 25%);
+}
+
+.debug-panel h3 {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+#status-debug {
+  margin: 0.2rem 0 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.76rem;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--text) 82%, transparent);
+  word-break: break-word;
+}
+
+#status-debug[data-level="warn"] {
+  color: #f59e0b;
+}
+
+#status-debug[data-level="error"] {
+  color: #ef4444;
+}
+
 .controls-panel {
   display: grid;
   gap: 0.55rem;

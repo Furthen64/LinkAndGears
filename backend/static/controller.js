@@ -206,6 +206,7 @@ function getControls() {
     scene_tree_content: document.getElementById("scene-tree-content"),
     add_gear: document.getElementById("add-gear"),
     add_joint: document.getElementById("add-joint"),
+    status_debug: document.getElementById("status-debug"),
   };
 }
 
@@ -517,6 +518,30 @@ export function bootstrap() {
     };
   }
 
+  function setStatusMessage(message, options = {}) {
+    const {
+      debug = null,
+      level = "info",
+    } = options;
+
+    status.textContent = message;
+
+    const debugLabel = controls.status_debug;
+    if (!debugLabel) {
+      return;
+    }
+
+    if (typeof debug === "string" && debug.trim().length > 0) {
+      const levelPrefix = level === "error" ? "ERROR" : level === "warn" ? "WARN" : "INFO";
+      debugLabel.textContent = `${levelPrefix}: ${debug}`;
+      debugLabel.dataset.level = level;
+      return;
+    }
+
+    debugLabel.textContent = "No debug events.";
+    debugLabel.dataset.level = "info";
+  }
+
   function applySceneGraphConfig(sceneConfig) {
     const graph = sceneConfig?.sceneGraph ?? sceneConfig?.scene_graph ?? {};
     const inputExtraGears = Array.isArray(graph.extraGears) ? graph.extraGears : [];
@@ -627,9 +652,12 @@ export function bootstrap() {
       simulation.selectedObjectId = "gear-1";
     }
 
-    status.textContent = repairedCount > 0
+    const removalMessage = repairedCount > 0
       ? `Removed ${nodeId}. Re-meshed ${repairedCount} gear${repairedCount === 1 ? "" : "s"}.`
       : `Removed ${nodeId} from scene tree.`;
+    setStatusMessage(removalMessage, {
+      debug: `deleteTreeNodeById(nodeId=${nodeId}, repairedCount=${repairedCount}, fallbackAnchor=${fallbackAnchorId ?? "none"})`,
+    });
     renderScene();
   }
 
@@ -873,7 +901,10 @@ export function bootstrap() {
     updateSelectionPanel(state);
 
     if (simulation.normalizationError) {
-      status.textContent = `Invalid parameters: ${simulation.normalizationError}`;
+      setStatusMessage(`Invalid parameters: ${simulation.normalizationError}`, {
+        debug: simulation.normalizationError,
+        level: "warn",
+      });
       return;
     }
 
@@ -881,9 +912,15 @@ export function bootstrap() {
     const invalidField = resolveFieldNameFromReason(state.invalidReason, simulation.scene.inputConstraints);
     const invalidDetail = invalidField ? `[${invalidField}] ${state.invalidReason}` : state.invalidReason;
 
-    status.textContent = state.valid
-      ? `${simulation.isPlaying ? "Running" : "Paused"} (${simulation.params.slider_axis}) t=${simulation.timeSeconds.toFixed(2)}s`
-      : `${invalidPrefix}: ${invalidDetail}`;
+    setStatusMessage(
+      state.valid
+        ? `${simulation.isPlaying ? "Running" : "Paused"} (${simulation.params.slider_axis}) t=${simulation.timeSeconds.toFixed(2)}s`
+        : `${invalidPrefix}: ${invalidDetail}`,
+      {
+        debug: state.valid ? null : `${state.invalidCategory ?? "unknown"}: ${state.invalidReason ?? "missing reason"}`,
+        level: state.valid ? "info" : "warn",
+      },
+    );
   }
 
   function renderLoop(timestamp) {
@@ -1104,14 +1141,18 @@ export function bootstrap() {
     simulation.sceneGraph.extraGears = [];
     simulation.sceneGraph.extraJoints = [];
     clearPendingGearSlot();
-    status.textContent = "New scene created.";
+    setStatusMessage("New scene created.", {
+      debug: `Loaded baseline workspace from ${NEW_SCENE_BASELINE_PATH}.`,
+    });
     applySceneConfig(baseline);
   });
 
   controls.save_scene_json?.addEventListener("click", () => {
     const payload = buildSceneExportPayload();
     downloadSceneJson(payload);
-    status.textContent = "Saved scene JSON";
+    setStatusMessage("Saved scene JSON", {
+      debug: "Scene export finished successfully.",
+    });
   });
 
   controls.reset_view?.addEventListener("click", () => {
@@ -1212,7 +1253,9 @@ export function bootstrap() {
 
     if (matchedSlot) {
       simulation.pendingGearSlot = matchedSlot;
-      status.textContent = "Placement slot selected. Click Add Gear to create the new gear.";
+      setStatusMessage("Placement slot selected. Click Add Gear to create the new gear.", {
+        debug: `Pending gear slot anchored to ${simulation.pendingGearSlot.anchorId}.`,
+      });
       renderScene();
       return;
     }
