@@ -206,6 +206,7 @@ function getControls() {
     scene_tree_content: document.getElementById("scene-tree-content"),
     add_gear: document.getElementById("add-gear"),
     add_joint: document.getElementById("add-joint"),
+    delete_selected: document.getElementById("delete-selected"),
     status_debug: document.getElementById("status-debug"),
   };
 }
@@ -1225,6 +1226,22 @@ export function bootstrap() {
     selectObjectById(id);
   });
 
+  function deleteSelectedNode() {
+    if (!isDeletableTreeNode(simulation.selectedObjectId)) {
+      setStatusMessage("Select an extra gear or joint to delete.", {
+        debug: `deleteSelectedNode ignored; selectedObjectId=${simulation.selectedObjectId ?? "none"}.`,
+        level: "warn",
+      });
+      return;
+    }
+
+    deleteTreeNodeById(simulation.selectedObjectId);
+  }
+
+  controls.delete_selected?.addEventListener("click", () => {
+    deleteSelectedNode();
+  });
+
   function getCanvasPointFromEvent(event) {
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
@@ -1334,6 +1351,20 @@ export function bootstrap() {
   }
 
   document.addEventListener("keydown", (event) => {
+    if (event.code === "Delete" || event.code === "Backspace") {
+      const target = event.target;
+      const isTypingTarget = target instanceof HTMLInputElement
+        || target instanceof HTMLTextAreaElement
+        || target instanceof HTMLSelectElement
+        || (target instanceof HTMLElement && target.isContentEditable);
+
+      if (!isTypingTarget && isDeletableTreeNode(simulation.selectedObjectId)) {
+        event.preventDefault();
+        deleteSelectedNode();
+        return;
+      }
+    }
+
     if (event.code === "Space") {
       spacePressed = true;
     }
