@@ -1210,7 +1210,7 @@ export function bootstrap() {
     const selectedGearFromSlot = typeof slot?.sourceGearId === "string" ? gearLookup[slot.sourceGearId] : null;
     const selectedGearFromSelection = selectedIsGear ? gearLookup[simulation.selectedObjectId] : null;
     const relationTarget = selectedGearFromSlot ?? selectedGearFromSelection ?? gearLookup["motor-1"];
-    const shouldMesh = Boolean(relationTarget && relationTarget.id !== "motor-1");
+    const shouldMesh = Boolean(relationTarget);
     const meshCenterFromDirection = shouldMesh ? resolvePlacementCenterFromDirection(relationTarget, radius, slot) : null;
     const center = meshCenterFromDirection
       ? meshCenterFromDirection
