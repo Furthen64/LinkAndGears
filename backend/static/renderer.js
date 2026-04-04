@@ -148,10 +148,15 @@ function normalizeGearNode(rawNode, fallback, index = 0) {
     meshPartnerId: rawNode?.meshPartnerId ?? rawNode?.meshWith ?? null,
     renderStyle: rawNode?.renderStyle ?? rawNode?.style ?? null,
     role: rawNode?.role ?? fallback.role,
+    showIndicator: rawNode?.showIndicator === true ? true : fallback.showIndicator === true,
     drawCenterMarker: rawNode?.drawCenterMarker ?? fallback.drawCenterMarker,
     drawMotorHub: rawNode?.drawMotorHub ?? fallback.drawMotorHub,
     zIndex: Number.isFinite(rawNode?.zIndex) ? rawNode.zIndex : index,
   };
+}
+
+function getGearToothPhaseOffset(node, geometry) {
+  return node.id === "motor-1" || node.role === "driver" ? Math.PI / geometry.toothCount : 0;
 }
 
 function computeGearNodes(params, state) {
@@ -168,6 +173,7 @@ function computeGearNodes(params, state) {
       meshPartnerId: "gear-1",
       parentId: null,
       role: "driver",
+      showIndicator: false,
       drawMotorHub: true,
       drawCenterMarker: false,
     },
@@ -184,6 +190,7 @@ function computeGearNodes(params, state) {
       meshPartnerId: "motor-1",
       parentId: "motor-1",
       role: "driven",
+      showIndicator: true,
       drawMotorHub: false,
       drawCenterMarker: true,
     },
@@ -211,6 +218,7 @@ function computeGearNodes(params, state) {
       parentId: null,
       meshPartnerId: null,
       role: "gear",
+      showIndicator: false,
       drawCenterMarker: false,
       drawMotorHub: false,
     };
@@ -222,7 +230,7 @@ function drawGearNode(ctx, transform, params, scene, node) {
   const style = node.renderStyle ?? (node.id === "motor-1" || node.role === "driver" ? scene.driverGear : scene.gear);
   const geometry = getGearGeometry(node.radius, params, style, transform, node.toothCount);
   const centerCanvas = transform.toCanvas(node.center);
-  const toothPhaseOffset = node.id === "motor-1" || node.role === "driver" ? Math.PI / geometry.toothCount : 0;
+  const toothPhaseOffset = getGearToothPhaseOffset(node, geometry);
 
   drawGearBody(ctx, centerCanvas, node.angle + toothPhaseOffset, geometry, style);
 
@@ -241,6 +249,50 @@ function drawGearNode(ctx, transform, params, scene, node) {
   }
 
   return { centerCanvas, geometry };
+}
+
+function drawGearIndicator(ctx, scene, node, centerCanvas, geometry, fallbackAngularSpeed = Number.NaN) {
+  const toothPhaseOffset = getGearToothPhaseOffset(node, geometry);
+  const arrowAngle = (Number.isFinite(node?.angle) ? node.angle : 0) + toothPhaseOffset;
+  const arrowRadius = geometry.pitchRadiusPx;
+  const arrowTail = {
+    x: centerCanvas.x + Math.cos(arrowAngle) * arrowRadius,
+    y: centerCanvas.y - Math.sin(arrowAngle) * arrowRadius,
+  };
+  const resolvedAngularSpeed = Number.isFinite(node?.angularSpeed) ? node.angularSpeed : fallbackAngularSpeed;
+  const direction =
+    resolvedAngularSpeed >= 0
+      ? scene.rotationArrow.directionWithPositiveSpeed
+      : -scene.rotationArrow.directionWithPositiveSpeed;
+  const tangent = {
+    x: -Math.sin(arrowAngle) * direction,
+    y: -Math.cos(arrowAngle) * direction,
+  };
+  const arrowTip = {
+    x: arrowTail.x + tangent.x * scene.rotationArrow.shaftLengthPx,
+    y: arrowTail.y + tangent.y * scene.rotationArrow.shaftLengthPx,
+  };
+
+  ctx.strokeStyle = scene.rotationArrow.stroke;
+  ctx.fillStyle = scene.rotationArrow.fill;
+  ctx.lineWidth = scene.rotationArrow.lineWidth;
+  ctx.beginPath();
+  ctx.moveTo(arrowTail.x, arrowTail.y);
+  ctx.lineTo(arrowTip.x, arrowTip.y);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(arrowTip.x, arrowTip.y);
+  ctx.lineTo(
+    arrowTip.x - tangent.y * scene.rotationArrow.headLengthPx - tangent.x * scene.rotationArrow.headLengthPx,
+    arrowTip.y + tangent.x * scene.rotationArrow.headLengthPx - tangent.y * scene.rotationArrow.headLengthPx
+  );
+  ctx.lineTo(
+    arrowTip.x + tangent.y * scene.rotationArrow.headLengthPx - tangent.x * scene.rotationArrow.headLengthPx,
+    arrowTip.y - tangent.x * scene.rotationArrow.headLengthPx - tangent.y * scene.rotationArrow.headLengthPx
+  );
+  ctx.closePath();
+  ctx.fill();
 }
 
 function distanceToSegment(point, a, b) {
@@ -497,52 +549,17 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
   }
 
   const renderedGears = gearNodes.map((node) => ({ node, ...drawGearNode(ctx, t, params, scene, node) }));
+  renderedGears.forEach(({ node, centerCanvas, geometry }) => {
+    if (node.showIndicator !== true) {
+      return;
+    }
+    drawGearIndicator(ctx, scene, node, centerCanvas, geometry, params.angular_speed);
+  });
+
   const drivenGear = renderedGears.find((entry) => entry.node.id === "gear-1")
     ?? renderedGears.find((entry) => entry.node.role !== "driver")
     ?? renderedGears[0];
   const center = drivenGear?.centerCanvas ?? t.toCanvas({ x: 0, y: 0 });
-  const drivenGeometry = drivenGear?.geometry;
-  const drivenNode = drivenGear?.node;
-
-  const arrowAngle = Number.isFinite(drivenNode?.angle) ? drivenNode.angle : state.gear_angle;
-  const arrowRadius = drivenGeometry?.pitchRadiusPx ?? t.toCanvasLength(params.gear_radius);
-  const arrowTail = {
-    x: center.x + Math.cos(arrowAngle) * arrowRadius,
-    y: center.y - Math.sin(arrowAngle) * arrowRadius,
-  };
-  const direction =
-    (Number.isFinite(drivenNode?.angularSpeed) ? drivenNode.angularSpeed : params.angular_speed) >= 0
-      ? scene.rotationArrow.directionWithPositiveSpeed
-      : -scene.rotationArrow.directionWithPositiveSpeed;
-  const tangent = {
-    x: -Math.sin(arrowAngle) * direction,
-    y: -Math.cos(arrowAngle) * direction,
-  };
-  const arrowTip = {
-    x: arrowTail.x + tangent.x * scene.rotationArrow.shaftLengthPx,
-    y: arrowTail.y + tangent.y * scene.rotationArrow.shaftLengthPx,
-  };
-
-  ctx.strokeStyle = scene.rotationArrow.stroke;
-  ctx.fillStyle = scene.rotationArrow.fill;
-  ctx.lineWidth = scene.rotationArrow.lineWidth;
-  ctx.beginPath();
-  ctx.moveTo(arrowTail.x, arrowTail.y);
-  ctx.lineTo(arrowTip.x, arrowTip.y);
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.moveTo(arrowTip.x, arrowTip.y);
-  ctx.lineTo(
-    arrowTip.x - tangent.y * scene.rotationArrow.headLengthPx - tangent.x * scene.rotationArrow.headLengthPx,
-    arrowTip.y + tangent.x * scene.rotationArrow.headLengthPx - tangent.y * scene.rotationArrow.headLengthPx
-  );
-  ctx.lineTo(
-    arrowTip.x + tangent.y * scene.rotationArrow.headLengthPx - tangent.x * scene.rotationArrow.headLengthPx,
-    arrowTip.y - tangent.x * scene.rotationArrow.headLengthPx - tangent.y * scene.rotationArrow.headLengthPx
-  );
-  ctx.closePath();
-  ctx.fill();
 
   ctx.strokeStyle = scene.crankArm.stroke;
   ctx.lineWidth = scene.crankArm.lineWidth;
