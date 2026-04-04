@@ -306,6 +306,7 @@ export function computeState(params, t) {
           module: params.module,
           toothCount: params.driver_teeth,
           role: "driver",
+          showIndicator: false,
         },
         {
           id: "gear-1",
@@ -317,6 +318,7 @@ export function computeState(params, t) {
           toothCount: params.driven_teeth,
           role: "driven",
           center: { x: 0, y: 0 },
+          showIndicator: true,
         },
         ...((params.scene_graph?.extraGears ?? []).map((node) => ({
           id: node.id,
@@ -329,6 +331,7 @@ export function computeState(params, t) {
           meshWith: node.meshWith,
           parentId: node.parentId,
           role: "gear",
+          showIndicator: node.showIndicator === true,
         }))),
       ],
     },
@@ -364,6 +367,7 @@ export function computeState(params, t) {
     parentId: node.parentId ?? null,
     meshPartnerId: node.meshWith ?? null,
     role: node.role,
+    showIndicator: node.showIndicator === true,
     drawCenterMarker: node.id !== "motor-1",
     drawMotorHub: node.id === "motor-1",
     zIndex: index,
