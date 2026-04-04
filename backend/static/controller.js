@@ -342,12 +342,14 @@ export function bootstrap() {
         label: "Motor1",
         center: { x: -centerDistance, y: 0 },
         radius: simulation.params.driver_radius,
+        showIndicator: false,
       },
       "gear-1": {
         id: "gear-1",
         label: "Gear1",
         center: { x: 0, y: 0 },
         radius: simulation.params.gear_radius,
+        showIndicator: true,
       },
     };
   }
@@ -504,6 +506,7 @@ export function bootstrap() {
             y: Number.isFinite(rawNode.linkageAnchor.y) ? rawNode.linkageAnchor.y : 0,
           }
         : null,
+      showIndicator: rawNode?.showIndicator === true,
     };
   }
 
@@ -1235,6 +1238,7 @@ export function bootstrap() {
       centerMode: shouldMesh ? "manual" : "parent",
       center,
       linkageAnchor: null,
+      showIndicator: false,
     });
     simulation.sceneTreeDirty = true;
     clearPendingGearSlot();
