@@ -161,6 +161,10 @@ function getGearToothPhaseOffset(node, geometry) {
 
 function computeGearNodes(params, state) {
   const nominalCenterDistance = params.gear_radius + params.driver_radius;
+  const canonicalGearConfig = params.scene_graph?.canonicalGears ?? {};
+  const extraGearConfigById = Object.fromEntries(
+    ((params.scene_graph?.extraGears ?? []).filter((node) => typeof node?.id === "string")).map((node) => [node.id, node])
+  );
   const defaults = [
     {
       id: "motor-1",
@@ -173,7 +177,7 @@ function computeGearNodes(params, state) {
       meshPartnerId: "gear-1",
       parentId: null,
       role: "driver",
-      showIndicator: false,
+      showIndicator: canonicalGearConfig?.["motor-1"]?.showIndicator === true,
       drawMotorHub: true,
       drawCenterMarker: false,
     },
@@ -190,7 +194,7 @@ function computeGearNodes(params, state) {
       meshPartnerId: "motor-1",
       parentId: "motor-1",
       role: "driven",
-      showIndicator: true,
+      showIndicator: canonicalGearConfig?.["gear-1"]?.showIndicator === false ? false : true,
       drawMotorHub: false,
       drawCenterMarker: true,
     },
@@ -207,6 +211,7 @@ function computeGearNodes(params, state) {
   }
 
   return stateNodes.map((node, index) => {
+    const extraNodeConfig = typeof node?.id === "string" ? extraGearConfigById[node.id] : null;
     const fallback = defaults.find((item) => item.id === node?.id) ?? {
       ...defaults[1],
       id: node?.id ?? `gear-${index + 1}`,
@@ -218,7 +223,7 @@ function computeGearNodes(params, state) {
       parentId: null,
       meshPartnerId: null,
       role: "gear",
-      showIndicator: false,
+      showIndicator: extraNodeConfig?.showIndicator === true,
       drawCenterMarker: false,
       drawMotorHub: false,
     };

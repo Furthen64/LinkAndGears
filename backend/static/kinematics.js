@@ -293,6 +293,7 @@ export function computeState(params, t) {
   const canonicalCenterDistance = Number.isFinite(center_distance)
     ? center_distance
     : driver_radius + params.gear_radius;
+  const canonicalGearConfig = params.scene_graph?.canonicalGears ?? {};
 
   const sceneState = computeSceneState(
     {
@@ -306,7 +307,7 @@ export function computeState(params, t) {
           module: params.module,
           toothCount: params.driver_teeth,
           role: "driver",
-          showIndicator: false,
+          showIndicator: canonicalGearConfig?.["motor-1"]?.showIndicator === true,
         },
         {
           id: "gear-1",
@@ -318,7 +319,7 @@ export function computeState(params, t) {
           toothCount: params.driven_teeth,
           role: "driven",
           center: { x: 0, y: 0 },
-          showIndicator: true,
+          showIndicator: canonicalGearConfig?.["gear-1"]?.showIndicator === false ? false : true,
         },
         ...((params.scene_graph?.extraGears ?? []).map((node) => ({
           id: node.id,
