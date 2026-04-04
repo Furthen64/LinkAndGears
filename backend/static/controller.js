@@ -197,6 +197,8 @@ function getControls() {
     derived_angular_speed: document.getElementById("derived-angular-speed"),
     selection_name: document.getElementById("selection-name"),
     selection_details: document.getElementById("selection-details"),
+    selection_show_indicator_row: document.getElementById("selection-show-indicator-row"),
+    selection_show_indicator: document.getElementById("selection-show-indicator"),
     workspace_preset: document.getElementById("workspace-preset"),
     new_scene: document.getElementById("new-scene"),
     save_scene_json: document.getElementById("save-scene-json"),
@@ -291,6 +293,10 @@ export function bootstrap() {
     selectedObjectId: "gear-1",
     hitRegions: [],
     sceneGraph: {
+      canonicalGears: {
+        "motor-1": { showIndicator: false },
+        "gear-1": { showIndicator: true },
+      },
       extraGears: [],
       extraJoints: [],
     },
@@ -342,16 +348,28 @@ export function bootstrap() {
         label: "Motor1",
         center: { x: -centerDistance, y: 0 },
         radius: simulation.params.driver_radius,
-        showIndicator: false,
+        showIndicator: simulation.sceneGraph.canonicalGears?.["motor-1"]?.showIndicator === true,
       },
       "gear-1": {
         id: "gear-1",
         label: "Gear1",
         center: { x: 0, y: 0 },
         radius: simulation.params.gear_radius,
-        showIndicator: true,
+        showIndicator: simulation.sceneGraph.canonicalGears?.["gear-1"]?.showIndicator === true,
       },
     };
+  }
+
+  function isGearNodeId(nodeId) {
+    return typeof nodeId === "string" && (nodeId === "motor-1" || nodeId === "gear-1" || /^gear-\d+$/.test(nodeId));
+  }
+
+  function getSelectedGearNode() {
+    if (!isGearNodeId(simulation.selectedObjectId)) {
+      return null;
+    }
+
+    return getGearLookup()[simulation.selectedObjectId] ?? null;
   }
 
   function toPositiveFinite(value, fallback) {
@@ -551,6 +569,11 @@ export function bootstrap() {
     const graph = sceneConfig?.sceneGraph ?? sceneConfig?.scene_graph ?? {};
     const inputExtraGears = Array.isArray(graph.extraGears) ? graph.extraGears : [];
     const inputExtraJoints = Array.isArray(graph.extraJoints) ? graph.extraJoints : [];
+    const canonicalGears = graph.canonicalGears ?? graph.canonical_gears ?? {};
+    simulation.sceneGraph.canonicalGears = {
+      "motor-1": { showIndicator: canonicalGears?.["motor-1"]?.showIndicator === true },
+      "gear-1": { showIndicator: canonicalGears?.["gear-1"]?.showIndicator === false ? false : true },
+    };
     simulation.sceneGraph.extraGears = inputExtraGears.map((node, index) => sanitizeExtraGearNode(node, index + 2));
     simulation.sceneGraph.extraJoints = inputExtraJoints.map((node, index) => sanitizeExtraJointNode(node, index + 1));
     simulation.sceneTreeDirty = true;
@@ -854,6 +877,7 @@ export function bootstrap() {
       simulation.params = {
         ...normalization.params,
         scene_graph: {
+          canonicalGears: simulation.sceneGraph.canonicalGears,
           extraGears: simulation.sceneGraph.extraGears,
           extraJoints: simulation.sceneGraph.extraJoints,
         },
@@ -896,6 +920,16 @@ export function bootstrap() {
       controls.selection_details.appendChild(dt);
       controls.selection_details.appendChild(dd);
     });
+
+    const selectedGearNode = getSelectedGearNode();
+    const canEditIndicator = Boolean(selectedGearNode);
+    if (controls.selection_show_indicator_row) {
+      controls.selection_show_indicator_row.hidden = !canEditIndicator;
+    }
+    if (controls.selection_show_indicator) {
+      controls.selection_show_indicator.disabled = !canEditIndicator;
+      controls.selection_show_indicator.checked = selectedGearNode?.showIndicator === true;
+    }
 
     if (simulation.sceneTreeDirty) {
       renderSceneTree();
@@ -1048,6 +1082,7 @@ export function bootstrap() {
     return {
       ...buildCurrentSceneJson(),
       sceneGraph: {
+        canonicalGears: simulation.sceneGraph.canonicalGears,
         extraGears: simulation.sceneGraph.extraGears,
         extraJoints: simulation.sceneGraph.extraJoints,
       },
@@ -1162,6 +1197,10 @@ export function bootstrap() {
     simulation.timeSeconds = 0;
     simulation.lastTimestamp = performance.now();
     simulation.selectedObjectId = "gear-1";
+    simulation.sceneGraph.canonicalGears = {
+      "motor-1": { showIndicator: false },
+      "gear-1": { showIndicator: true },
+    };
     simulation.sceneGraph.extraGears = [];
     simulation.sceneGraph.extraJoints = [];
     simulation.sceneTreeDirty = true;
@@ -1267,6 +1306,27 @@ export function bootstrap() {
 
   controls.delete_selected?.addEventListener("click", () => {
     deleteSelectedNode();
+  });
+
+  controls.selection_show_indicator?.addEventListener("change", () => {
+    const selectedId = simulation.selectedObjectId;
+    if (!isGearNodeId(selectedId)) {
+      return;
+    }
+
+    const nextValue = controls.selection_show_indicator.checked === true;
+    if (selectedId === "motor-1" || selectedId === "gear-1") {
+      simulation.sceneGraph.canonicalGears[selectedId] = { showIndicator: nextValue };
+    } else {
+      const gearNode = simulation.sceneGraph.extraGears.find((node) => node.id === selectedId);
+      if (!gearNode) {
+        return;
+      }
+      gearNode.showIndicator = nextValue;
+    }
+
+    syncParamsFromControls();
+    renderScene();
   });
 
   function getCanvasPointFromEvent(event) {
