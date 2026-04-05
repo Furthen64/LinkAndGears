@@ -266,6 +266,19 @@ export function bootstrap() {
     "slider-offset": "0",
     "slider-axis": "horizontal",
     "theme-mode": "dark",
+    sceneGraph: {
+      rootNodeId: "motor-1",
+      genesisNodeId: "motor-1",
+      genesisPolicy: {
+        allowedTypes: ["motor", "joint-anchor"],
+      },
+      canonicalGears: {
+        "motor-1": { showIndicator: false },
+        "gear-1": { showIndicator: true },
+      },
+      extraGears: [],
+      extraJoints: [],
+    },
   };
   const SCENE_EXPORT_CONTROL_IDS = [
     "shared-module",
@@ -293,12 +306,18 @@ export function bootstrap() {
     selectedObjectId: "gear-1",
     hitRegions: [],
     sceneGraph: {
+      rootNodeId: "motor-1",
+      genesisNodeId: "motor-1",
+      genesisPolicy: {
+        allowedTypes: ["motor", "joint-anchor"],
+      },
       canonicalGears: {
         "motor-1": { showIndicator: false },
         "gear-1": { showIndicator: true },
       },
       extraGears: [],
       extraJoints: [],
+      nodeRegistry: {},
     },
     camera: {
       zoom: 1,
@@ -340,6 +359,19 @@ export function bootstrap() {
     return { id, label, children };
   }
 
+  function normalizeNodeType(rawType) {
+    if (typeof rawType !== "string") {
+      return "gear";
+    }
+    return rawType.toLowerCase() === "joint-anchor" ? "joint-anchor" : rawType.toLowerCase();
+  }
+
+  function isAllowedGenesisType(nodeType, policy = simulation.sceneGraph.genesisPolicy) {
+    const normalizedType = normalizeNodeType(nodeType);
+    const allowed = Array.isArray(policy?.allowedTypes) ? policy.allowedTypes : ["motor", "joint-anchor"];
+    return allowed.map((entry) => normalizeNodeType(entry)).includes(normalizedType);
+  }
+
   function canonicalGearNodes() {
     const centerDistance = simulation.params.driver_radius + simulation.params.gear_radius;
     return {
@@ -360,8 +392,94 @@ export function bootstrap() {
     };
   }
 
+  function canonicalSceneNodes() {
+    const gears = canonicalGearNodes();
+    return {
+      "motor-1": {
+        id: "motor-1",
+        label: "Motor1",
+        type: "motor",
+        parentId: null,
+        attachmentTargetId: null,
+        meshWith: "gear-1",
+        ...gears["motor-1"],
+      },
+      "gear-1": {
+        id: "gear-1",
+        label: "Gear1",
+        type: "gear",
+        parentId: "motor-1",
+        attachmentTargetId: "motor-1",
+        meshWith: "motor-1",
+        ...gears["gear-1"],
+      },
+      "linkage-1": {
+        id: "linkage-1",
+        label: "Linkage1",
+        type: "linkage-anchor",
+        parentId: "gear-1",
+        attachmentTargetId: "gear-1",
+      },
+      "slider-1": {
+        id: "slider-1",
+        label: "Slider1",
+        type: "slider",
+        parentId: "linkage-1",
+        attachmentTargetId: "linkage-1",
+      },
+      "ground-1": {
+        id: "ground-1",
+        label: "Ground1",
+        type: "ground-anchor",
+        parentId: "linkage-1",
+        attachmentTargetId: "linkage-1",
+      },
+    };
+  }
+
+  function getRootNodeId() {
+    return typeof simulation.sceneGraph.rootNodeId === "string" ? simulation.sceneGraph.rootNodeId : "motor-1";
+  }
+
+  function getPrimaryDrivenGearId() {
+    const registry = simulation.sceneGraph.nodeRegistry ?? {};
+    const rootId = getRootNodeId();
+    const driven = Object.values(registry).find((node) => {
+      const attachment = node?.meshWith ?? node?.parentId ?? node?.attachmentTargetId;
+      return attachment === rootId && normalizeNodeType(node?.type) === "gear";
+    });
+    return driven?.id ?? (registry["gear-1"] ? "gear-1" : rootId);
+  }
+
+  function rebuildNodeRegistry() {
+    const registry = {};
+    const canonicalNodes = canonicalSceneNodes();
+    Object.values(canonicalNodes).forEach((node) => {
+      registry[node.id] = { ...node };
+    });
+
+    simulation.sceneGraph.extraGears.forEach((node) => {
+      registry[node.id] = {
+        ...node,
+        type: "gear",
+        attachmentTargetId: node.meshWith ?? node.parentId ?? simulation.sceneGraph.rootNodeId,
+      };
+    });
+
+    simulation.sceneGraph.extraJoints.forEach((node) => {
+      registry[node.id] = {
+        ...node,
+        type: normalizeNodeType(node.type ?? "joint-anchor"),
+        attachmentTargetId: node.attachmentTargetId ?? node.parentId ?? "linkage-1",
+      };
+    });
+
+    simulation.sceneGraph.nodeRegistry = registry;
+  }
+
   function isGearNodeId(nodeId) {
-    return typeof nodeId === "string" && (nodeId === "motor-1" || nodeId === "gear-1" || /^gear-\d+$/.test(nodeId));
+    return typeof nodeId === "string"
+      && (nodeId === getRootNodeId() || nodeId === getPrimaryDrivenGearId() || /^gear-\d+$/.test(nodeId));
   }
 
   function getSelectedGearNode() {
@@ -475,12 +593,12 @@ export function bootstrap() {
       const fallbackAnchorId =
         preferredAnchorId && lookup[preferredAnchorId]
           ? preferredAnchorId
-          : currentAnchorId === deletedNodeId && lookup["gear-1"]
-            ? "gear-1"
-            : lookup["gear-1"]
-              ? "gear-1"
-              : "motor-1";
-      const fallbackAnchor = lookup[fallbackAnchorId] ?? lookup["motor-1"];
+          : currentAnchorId === deletedNodeId && lookup[getPrimaryDrivenGearId()]
+            ? getPrimaryDrivenGearId()
+            : lookup[getPrimaryDrivenGearId()]
+              ? getPrimaryDrivenGearId()
+              : getRootNodeId();
+      const fallbackAnchor = lookup[fallbackAnchorId] ?? lookup[getRootNodeId()];
       if (!fallbackAnchor) {
         return;
       }
@@ -532,6 +650,13 @@ export function bootstrap() {
     return {
       id: rawNode?.id ?? `joint-${fallbackIndex}`,
       label: rawNode?.label ?? `Joint${fallbackIndex}`,
+      type: normalizeNodeType(rawNode?.type ?? "joint-anchor"),
+      parentId: typeof rawNode?.parentId === "string" ? rawNode.parentId : "linkage-1",
+      attachmentTargetId: typeof rawNode?.attachmentTargetId === "string"
+        ? rawNode.attachmentTargetId
+        : typeof rawNode?.parentId === "string"
+          ? rawNode.parentId
+          : "linkage-1",
       linkageAnchor: rawNode?.linkageAnchor && typeof rawNode.linkageAnchor === "object"
         ? {
             x: Number.isFinite(rawNode.linkageAnchor.x) ? rawNode.linkageAnchor.x : 0,
@@ -576,49 +701,78 @@ export function bootstrap() {
     };
     simulation.sceneGraph.extraGears = inputExtraGears.map((node, index) => sanitizeExtraGearNode(node, index + 2));
     simulation.sceneGraph.extraJoints = inputExtraJoints.map((node, index) => sanitizeExtraJointNode(node, index + 1));
+    simulation.sceneGraph.rootNodeId = typeof graph.rootNodeId === "string" ? graph.rootNodeId : "motor-1";
+    simulation.sceneGraph.genesisNodeId = typeof graph.genesisNodeId === "string"
+      ? graph.genesisNodeId
+      : simulation.sceneGraph.rootNodeId;
+    simulation.sceneGraph.genesisPolicy = {
+      allowedTypes: Array.isArray(graph.genesisPolicy?.allowedTypes)
+        ? graph.genesisPolicy.allowedTypes.map((entry) => normalizeNodeType(entry))
+        : ["motor", "joint-anchor"],
+    };
     simulation.sceneTreeDirty = true;
     keepGearMeshesSane();
+    rebuildNodeRegistry();
+    if (!simulation.sceneGraph.nodeRegistry?.[simulation.sceneGraph.rootNodeId]) {
+      simulation.sceneGraph.rootNodeId = "motor-1";
+    }
+    const genesisType = simulation.sceneGraph.nodeRegistry?.[simulation.sceneGraph.genesisNodeId]?.type ?? "motor";
+    if (!isAllowedGenesisType(genesisType, simulation.sceneGraph.genesisPolicy)) {
+      simulation.sceneGraph.genesisNodeId = simulation.sceneGraph.rootNodeId;
+    }
     clearPendingGearSlot();
   }
 
   function buildTreeModel() {
-    const extraGearLookup = new Map();
-    simulation.sceneGraph.extraGears.forEach((node) => {
-      extraGearLookup.set(node.id, makeNode(node.id, node.label));
-    });
+    const registry = simulation.sceneGraph.nodeRegistry ?? {};
+    const rootId = simulation.sceneGraph.rootNodeId;
+    const rootSource = registry[rootId];
+    if (!rootSource) {
+      return [];
+    }
 
-    const rootNode = makeNode("motor-1", "Motor1", [
-      makeNode("gear-1", "Gear1", [
-        makeNode("linkage-1", "Linkage1", [
-          makeNode("slider-1", "Slider1"),
-          makeNode("ground-1", "Ground1"),
-        ]),
-      ]),
-    ]);
+    const nodesById = new Map(
+      Object.values(registry).map((node) => [node.id, makeNode(node.id, node.label ?? node.id)]),
+    );
+    const attachments = new Map();
 
-    const allGears = [
-      { id: "motor-1", children: rootNode.children },
-      { id: "gear-1", children: rootNode.children[0].children },
-      ...simulation.sceneGraph.extraGears.map((node) => ({
-        id: node.id,
-        children: extraGearLookup.get(node.id)?.children ?? [],
-      })),
-    ];
-    const childrenById = new Map(allGears.map((node) => [node.id, node.children]));
-
-    simulation.sceneGraph.extraGears.forEach((node) => {
-      const childNode = extraGearLookup.get(node.id);
-      if (!childNode) {
+    Object.values(registry).forEach((node) => {
+      if (node.id === rootId) {
         return;
       }
-      const parentId = node.meshWith ?? node.parentId ?? "motor-1";
-      const targetChildren = childrenById.get(parentId) ?? rootNode.children;
-      targetChildren.push(childNode);
+      const attachmentId = node.attachmentTargetId ?? node.meshWith ?? node.parentId;
+      if (!attachmentId || !nodesById.has(attachmentId)) {
+        return;
+      }
+      if (!attachments.has(attachmentId)) {
+        attachments.set(attachmentId, []);
+      }
+      attachments.get(attachmentId).push(node.id);
     });
 
-    const extraJointNodes = simulation.sceneGraph.extraJoints.map((node) => makeNode(node.id, node.label));
-    rootNode.children[0].children[0].children.push(...extraJointNodes);
-    return [rootNode];
+    const visited = new Set();
+    function attachChildren(nodeId) {
+      if (visited.has(nodeId)) {
+        return;
+      }
+      visited.add(nodeId);
+      const treeNode = nodesById.get(nodeId);
+      if (!treeNode) {
+        return;
+      }
+      const children = attachments.get(nodeId) ?? [];
+      children.forEach((childId) => {
+        const childNode = nodesById.get(childId);
+        if (!childNode) {
+          return;
+        }
+        treeNode.children.push(childNode);
+        attachChildren(childId);
+      });
+    }
+
+    attachChildren(rootId);
+    return [nodesById.get(rootId)];
   }
 
   function selectObjectById(objectId) {
@@ -665,12 +819,12 @@ export function bootstrap() {
     let repairedCount = 0;
     let fallbackAnchorId = null;
     if (deletedGear) {
-      fallbackAnchorId = deletedGear.meshWith ?? deletedGear.parentId ?? "gear-1";
+      fallbackAnchorId = deletedGear.meshWith ?? deletedGear.parentId ?? getPrimaryDrivenGearId();
       const dependents = simulation.sceneGraph.extraGears.filter(
         (node) => node.meshWith === deletedGear.id || node.parentId === deletedGear.id,
       );
       const lookup = getGearLookup();
-      const fallbackAnchor = lookup[fallbackAnchorId] ?? lookup["gear-1"] ?? lookup["motor-1"];
+      const fallbackAnchor = lookup[fallbackAnchorId] ?? lookup[getPrimaryDrivenGearId()] ?? lookup[getRootNodeId()];
 
       dependents.forEach((node, index) => {
         if (!fallbackAnchor) {
@@ -686,9 +840,10 @@ export function bootstrap() {
     }
 
     repairedCount += keepGearMeshesSane(deletedGear?.id ?? null, fallbackAnchorId);
+    rebuildNodeRegistry();
 
     if (simulation.selectedObjectId === nodeId) {
-      simulation.selectedObjectId = "gear-1";
+      simulation.selectedObjectId = getPrimaryDrivenGearId();
     }
 
     simulation.sceneTreeDirty = true;
@@ -874,9 +1029,14 @@ export function bootstrap() {
     simulation.normalizationError = normalization.error ?? null;
 
     if (normalization.params) {
+      rebuildNodeRegistry();
       simulation.params = {
         ...normalization.params,
         scene_graph: {
+          rootNodeId: simulation.sceneGraph.rootNodeId,
+          genesisNodeId: simulation.sceneGraph.genesisNodeId,
+          genesisPolicy: simulation.sceneGraph.genesisPolicy,
+          nodeRegistry: simulation.sceneGraph.nodeRegistry,
           canonicalGears: simulation.sceneGraph.canonicalGears,
           extraGears: simulation.sceneGraph.extraGears,
           extraJoints: simulation.sceneGraph.extraJoints,
@@ -1079,9 +1239,14 @@ export function bootstrap() {
   }
 
   function buildSceneExportPayload() {
+    rebuildNodeRegistry();
     return {
       ...buildCurrentSceneJson(),
       sceneGraph: {
+        rootNodeId: simulation.sceneGraph.rootNodeId,
+        genesisNodeId: simulation.sceneGraph.genesisNodeId,
+        genesisPolicy: simulation.sceneGraph.genesisPolicy,
+        nodeRegistry: simulation.sceneGraph.nodeRegistry,
         canonicalGears: simulation.sceneGraph.canonicalGears,
         extraGears: simulation.sceneGraph.extraGears,
         extraJoints: simulation.sceneGraph.extraJoints,
@@ -1196,13 +1361,19 @@ export function bootstrap() {
     const baseline = await loadNewSceneBaseline();
     simulation.timeSeconds = 0;
     simulation.lastTimestamp = performance.now();
-    simulation.selectedObjectId = "gear-1";
+    simulation.sceneGraph.rootNodeId = "motor-1";
+    simulation.sceneGraph.genesisNodeId = "motor-1";
+    simulation.sceneGraph.genesisPolicy = {
+      allowedTypes: ["motor", "joint-anchor"],
+    };
     simulation.sceneGraph.canonicalGears = {
       "motor-1": { showIndicator: false },
       "gear-1": { showIndicator: true },
     };
     simulation.sceneGraph.extraGears = [];
     simulation.sceneGraph.extraJoints = [];
+    rebuildNodeRegistry();
+    simulation.selectedObjectId = getPrimaryDrivenGearId();
     simulation.sceneTreeDirty = true;
     clearPendingGearSlot();
     setStatusMessage("New scene created.", {
@@ -1241,7 +1412,7 @@ export function bootstrap() {
     const canonicalModule = toPositiveFinite(Number(controls.module?.value), toPositiveFinite(simulation.params.module, 0.1));
     const canonicalDrivenTeeth = Math.max(1, Math.round(toPositiveFinite(Number(controls.z2?.value), 24)));
     const radius = (canonicalModule * canonicalDrivenTeeth) / 2;
-    const selectedIsGear = typeof simulation.selectedObjectId === "string" && (simulation.selectedObjectId === "gear-1" || /^gear-\d+$/.test(simulation.selectedObjectId));
+    const selectedIsGear = typeof simulation.selectedObjectId === "string" && (simulation.selectedObjectId === getPrimaryDrivenGearId() || /^gear-\d+$/.test(simulation.selectedObjectId));
 
     const gearLookup = {
       ...canonicalGearNodes(),
@@ -1251,7 +1422,14 @@ export function bootstrap() {
     const slot = simulation.pendingGearSlot;
     const selectedGearFromSlot = typeof slot?.sourceGearId === "string" ? gearLookup[slot.sourceGearId] : null;
     const selectedGearFromSelection = selectedIsGear ? gearLookup[simulation.selectedObjectId] : null;
-    const relationTarget = selectedGearFromSlot ?? selectedGearFromSelection ?? gearLookup["motor-1"];
+    const relationTarget = selectedGearFromSlot ?? selectedGearFromSelection ?? gearLookup[getRootNodeId()];
+    if (!relationTarget?.id || !gearLookup[relationTarget.id]) {
+      setStatusMessage("Unable to add gear: no valid attachment target selected.", {
+        debug: `add_gear aborted; target=${relationTarget?.id ?? "none"}, root=${simulation.sceneGraph.rootNodeId}.`,
+        level: "warn",
+      });
+      return;
+    }
     const shouldMesh = Boolean(relationTarget);
     const meshCenterFromDirection = shouldMesh ? resolvePlacementCenterFromDirection(relationTarget, radius, slot) : null;
     const center = meshCenterFromDirection
@@ -1269,7 +1447,7 @@ export function bootstrap() {
     simulation.sceneGraph.extraGears.push({
       id,
       label: `Gear${index}`,
-      parentId: shouldMesh ? null : "motor-1",
+      parentId: shouldMesh ? null : simulation.sceneGraph.rootNodeId,
       meshWith: shouldMesh ? relationTarget.id : null,
       module: canonicalModule,
       teeth: canonicalDrivenTeeth,
@@ -1279,6 +1457,7 @@ export function bootstrap() {
       linkageAnchor: null,
       showIndicator: false,
     });
+    rebuildNodeRegistry();
     simulation.sceneTreeDirty = true;
     clearPendingGearSlot();
     selectObjectById(id);
@@ -1287,7 +1466,24 @@ export function bootstrap() {
   controls.add_joint?.addEventListener("click", () => {
     const index = getNextDynamicNodeIndex("joint", simulation.sceneGraph.extraJoints);
     const id = `joint-${index}`;
-    simulation.sceneGraph.extraJoints.push({ id, label: `Joint${index}` });
+    const attachmentTargetId = simulation.sceneGraph.nodeRegistry?.[simulation.selectedObjectId]
+      ? simulation.selectedObjectId
+      : "linkage-1";
+    if (!simulation.sceneGraph.nodeRegistry?.[attachmentTargetId]) {
+      setStatusMessage("Unable to add joint: no valid attachment target found.", {
+        debug: `add_joint aborted; target=${attachmentTargetId}.`,
+        level: "warn",
+      });
+      return;
+    }
+    simulation.sceneGraph.extraJoints.push({
+      id,
+      label: `Joint${index}`,
+      type: "joint-anchor",
+      parentId: attachmentTargetId,
+      attachmentTargetId,
+    });
+    rebuildNodeRegistry();
     simulation.sceneTreeDirty = true;
     selectObjectById(id);
   });
@@ -1315,7 +1511,7 @@ export function bootstrap() {
     }
 
     const nextValue = controls.selection_show_indicator.checked === true;
-    if (selectedId === "motor-1" || selectedId === "gear-1") {
+    if (selectedId === getRootNodeId() || selectedId === getPrimaryDrivenGearId()) {
       simulation.sceneGraph.canonicalGears[selectedId] = { showIndicator: nextValue };
     } else {
       const gearNode = simulation.sceneGraph.extraGears.find((node) => node.id === selectedId);
@@ -1475,6 +1671,7 @@ export function bootstrap() {
 
   applyTheme(controls.theme_mode?.value);
   applyInputConstraints(simulation.scene.inputConstraints);
+  rebuildNodeRegistry();
   renderSceneTree();
   void applyPreset(controls.workspace_preset?.value ?? "default");
   loadSceneTemplate("/static/templates/default-scene.json").then((scene) => {
