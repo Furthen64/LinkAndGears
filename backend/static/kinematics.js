@@ -1,5 +1,4 @@
 export const MIN_PRACTICAL_TOOTH_COUNT = 6;
-export const MODULE_MATCH_TOLERANCE = 1e-9;
 export const CENTER_DISTANCE_TOLERANCE = 1e-6;
 
 function toFiniteNumber(value, fallback = 0) {
@@ -284,19 +283,6 @@ export function computeSceneState(sceneGraph, t) {
       }
 
       if (node.meshWith) {
-        if (Number.isFinite(node.module) && Number.isFinite(parent.module)) {
-          const moduleMismatch = Math.abs(node.module - parent.module);
-          if (moduleMismatch > MODULE_MATCH_TOLERANCE) {
-            return {
-              valid: false,
-              invalidCategory: "constraint",
-              invalidReason: `Module mismatch for mesh ${parentId}<->${id}`,
-              gearsById,
-              jointsById,
-            };
-          }
-        }
-
         const centerDistance = Math.hypot(node.center.x - parent.center.x, node.center.y - parent.center.y);
         const expectedDistance = parent.radius + node.radius;
         if (Math.abs(centerDistance - expectedDistance) > CENTER_DISTANCE_TOLERANCE) {
@@ -585,7 +571,6 @@ if (typeof globalThis !== "undefined") {
     computeSceneState,
     validateGearParams,
     MIN_PRACTICAL_TOOTH_COUNT,
-    MODULE_MATCH_TOLERANCE,
     CENTER_DISTANCE_TOLERANCE,
   };
 }
