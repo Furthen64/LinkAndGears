@@ -645,6 +645,53 @@ export function bootstrap() {
     };
   }
 
+  function realignMeshedGearCenters() {
+    const extraGears = simulation.sceneGraph.extraGears;
+    if (!Array.isArray(extraGears) || extraGears.length === 0) {
+      return 0;
+    }
+
+    let totalUpdates = 0;
+    const maxPasses = Math.max(1, extraGears.length);
+
+    for (let pass = 0; pass < maxPasses; pass += 1) {
+      const lookup = getGearLookup();
+      let passUpdates = 0;
+
+      extraGears.forEach((node) => {
+        if (!node || typeof node.id !== "string" || typeof node.meshWith !== "string") {
+          return;
+        }
+
+        const anchor = lookup[node.meshWith];
+        if (!anchor) {
+          return;
+        }
+
+        const nextCenter = resolveMeshCenter(anchor, node);
+        const prevX = Number.isFinite(node.center?.x) ? node.center.x : Number.NaN;
+        const prevY = Number.isFinite(node.center?.y) ? node.center.y : Number.NaN;
+        const changed = !Number.isFinite(prevX)
+          || !Number.isFinite(prevY)
+          || Math.abs(prevX - nextCenter.x) > 1e-9
+          || Math.abs(prevY - nextCenter.y) > 1e-9;
+
+        node.parentId = node.meshWith;
+        node.center = nextCenter;
+        if (changed) {
+          passUpdates += 1;
+        }
+      });
+
+      totalUpdates += passUpdates;
+      if (passUpdates === 0) {
+        break;
+      }
+    }
+
+    return totalUpdates;
+  }
+
   function keepGearMeshesSane(deletedNodeId = null, preferredAnchorId = null) {
     const extraGears = simulation.sceneGraph.extraGears;
     if (!Array.isArray(extraGears) || extraGears.length === 0) {
@@ -1282,6 +1329,10 @@ export function bootstrap() {
     }
 
     persistentTarget[key] = nextValue;
+    if (["module", "teeth", "radius", "radiusMode", "meshWith"].includes(key)) {
+      realignMeshedGearCenters();
+      keepGearMeshesSane();
+    }
     rebuildNodeRegistry();
     syncParamsFromControls();
     renderScene();
