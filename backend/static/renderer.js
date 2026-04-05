@@ -288,46 +288,28 @@ function drawGearNode(ctx, transform, params, scene, node) {
 
 function drawGearIndicator(ctx, scene, node, centerCanvas, geometry, fallbackAngularSpeed = Number.NaN) {
   const toothPhaseOffset = getGearToothPhaseOffset(node, geometry);
-  const arrowAngle = (Number.isFinite(node?.angle) ? node.angle : 0) + toothPhaseOffset;
-  const arrowRadius = geometry.pitchRadiusPx;
-  const arrowTail = {
-    x: centerCanvas.x + Math.cos(arrowAngle) * arrowRadius,
-    y: centerCanvas.y - Math.sin(arrowAngle) * arrowRadius,
+  const indicatorAngle = (Number.isFinite(node?.angle) ? node.angle : 0) + toothPhaseOffset;
+  const indicatorRadiusPx = Number.isFinite(scene?.rotationArrow?.radiusPx)
+    ? Math.max(1, scene.rotationArrow.radiusPx)
+    : 4;
+  const radialPlacementPx = Math.max(indicatorRadiusPx, geometry.tipRadiusPx - indicatorRadiusPx * 0.6);
+  const markerCenter = {
+    x: centerCanvas.x + Math.cos(indicatorAngle) * radialPlacementPx,
+    y: centerCanvas.y - Math.sin(indicatorAngle) * radialPlacementPx,
   };
   const resolvedAngularSpeed = Number.isFinite(node?.angularSpeed) ? node.angularSpeed : fallbackAngularSpeed;
-  const direction =
-    resolvedAngularSpeed >= 0
-      ? scene.rotationArrow.directionWithPositiveSpeed
-      : -scene.rotationArrow.directionWithPositiveSpeed;
-  const tangent = {
-    x: -Math.sin(arrowAngle) * direction,
-    y: -Math.cos(arrowAngle) * direction,
-  };
-  const arrowTip = {
-    x: arrowTail.x + tangent.x * scene.rotationArrow.shaftLengthPx,
-    y: arrowTail.y + tangent.y * scene.rotationArrow.shaftLengthPx,
-  };
+  const useSecondaryColor = !Number.isFinite(resolvedAngularSpeed) || resolvedAngularSpeed < 0;
+  const primaryFill = scene.rotationArrow.fill ?? "#0ea5e9";
+  const secondaryFill = scene.rotationArrow.secondaryFill ?? primaryFill;
+  const indicatorFill = useSecondaryColor ? secondaryFill : primaryFill;
 
-  ctx.strokeStyle = scene.rotationArrow.stroke;
-  ctx.fillStyle = scene.rotationArrow.fill;
-  ctx.lineWidth = scene.rotationArrow.lineWidth;
+  ctx.strokeStyle = scene.rotationArrow.stroke ?? "#e2e8f0";
+  ctx.fillStyle = indicatorFill;
+  ctx.lineWidth = Number.isFinite(scene.rotationArrow.lineWidth) ? scene.rotationArrow.lineWidth : 1.5;
   ctx.beginPath();
-  ctx.moveTo(arrowTail.x, arrowTail.y);
-  ctx.lineTo(arrowTip.x, arrowTip.y);
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.moveTo(arrowTip.x, arrowTip.y);
-  ctx.lineTo(
-    arrowTip.x - tangent.y * scene.rotationArrow.headLengthPx - tangent.x * scene.rotationArrow.headLengthPx,
-    arrowTip.y + tangent.x * scene.rotationArrow.headLengthPx - tangent.y * scene.rotationArrow.headLengthPx
-  );
-  ctx.lineTo(
-    arrowTip.x + tangent.y * scene.rotationArrow.headLengthPx - tangent.x * scene.rotationArrow.headLengthPx,
-    arrowTip.y - tangent.x * scene.rotationArrow.headLengthPx - tangent.y * scene.rotationArrow.headLengthPx
-  );
-  ctx.closePath();
+  ctx.arc(markerCenter.x, markerCenter.y, indicatorRadiusPx, 0, Math.PI * 2);
   ctx.fill();
+  ctx.stroke();
 }
 
 function distanceToSegment(point, a, b) {
