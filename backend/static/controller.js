@@ -196,6 +196,7 @@ function getControls() {
     new_scene: document.getElementById("new-scene"),
     save_scene_json: document.getElementById("save-scene-json"),
     reset_view: document.getElementById("reset-view"),
+    refresh_view: document.getElementById("refresh-view"),
     scene_tree: document.getElementById("scene-tree"),
     toggle_scene_tree: document.getElementById("toggle-scene-tree"),
     scene_tree_content: document.getElementById("scene-tree-content"),
@@ -1596,6 +1597,16 @@ export function bootstrap() {
     renderScene();
   });
 
+  controls.refresh_view?.addEventListener("click", () => {
+    rebuildNodeRegistry();
+    syncParamsFromControls();
+    simulation.sceneTreeDirty = true;
+    renderScene();
+    setStatusMessage("View refreshed.", {
+      debug: "Manual refresh: rebuilt node registry and re-rendered scene.",
+    });
+  });
+
   controls.toggle_scene_tree?.addEventListener("click", () => {
     const willCollapse = !document.body.classList.contains("scene-tree-collapsed");
     document.body.classList.toggle("scene-tree-collapsed", willCollapse);
@@ -1659,6 +1670,7 @@ export function bootstrap() {
       showIndicator: false,
     });
     rebuildNodeRegistry();
+    syncParamsFromControls();
     simulation.sceneTreeDirty = true;
     clearPendingGearSlot();
     selectObjectById(id);
@@ -1685,6 +1697,7 @@ export function bootstrap() {
       attachmentTargetId,
     });
     rebuildNodeRegistry();
+    syncParamsFromControls();
     simulation.sceneTreeDirty = true;
     selectObjectById(id);
   });
