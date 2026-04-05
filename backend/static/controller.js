@@ -703,6 +703,37 @@ export function bootstrap() {
     };
   }
 
+  function sanitizeRegistryNode(rawNode, fallback = {}) {
+    return {
+      ...rawNode,
+      id: rawNode?.id ?? fallback.id,
+      label: rawNode?.label ?? fallback.label ?? rawNode?.id ?? fallback.id,
+      type: normalizeNodeType(rawNode?.type ?? fallback.type ?? "gear"),
+      parentId: typeof rawNode?.parentId === "string" ? rawNode.parentId : (fallback.parentId ?? null),
+      attachmentTargetId: typeof rawNode?.attachmentTargetId === "string"
+        ? rawNode.attachmentTargetId
+        : (typeof rawNode?.parentId === "string" ? rawNode.parentId : (fallback.attachmentTargetId ?? null)),
+      center: rawNode?.center && typeof rawNode.center === "object"
+        ? {
+            x: Number.isFinite(rawNode.center.x) ? rawNode.center.x : 0,
+            y: Number.isFinite(rawNode.center.y) ? rawNode.center.y : 0,
+          }
+        : (fallback.center ?? { x: 0, y: 0 }),
+      module: Number.isFinite(Number(rawNode?.module)) ? Number(rawNode.module) : fallback.module,
+      teeth: Number.isFinite(Number(rawNode?.teeth ?? rawNode?.toothCount))
+        ? Number(rawNode.teeth ?? rawNode.toothCount)
+        : fallback.teeth,
+      radiusMode: rawNode?.radiusMode === "manual" ? "manual" : (fallback.radiusMode ?? "moduleTeeth"),
+      radius: Number.isFinite(Number(rawNode?.radius)) ? Number(rawNode.radius) : fallback.radius,
+      meshWith: typeof rawNode?.meshWith === "string" ? rawNode.meshWith : (fallback.meshWith ?? null),
+      inputRpm: Number.isFinite(Number(rawNode?.inputRpm)) ? Number(rawNode.inputRpm) : fallback.inputRpm,
+      inputAngularSpeed: Number.isFinite(Number(rawNode?.inputAngularSpeed ?? rawNode?.angularSpeed))
+        ? Number(rawNode.inputAngularSpeed ?? rawNode.angularSpeed)
+        : fallback.inputAngularSpeed,
+      showIndicator: rawNode?.showIndicator === true,
+    };
+  }
+
   function setStatusMessage(message, options = {}) {
     const {
       debug = null,
@@ -782,6 +813,52 @@ export function bootstrap() {
     simulation.sceneTreeDirty = true;
     keepGearMeshesSane();
     rebuildNodeRegistry();
+    const providedRegistry = graph?.nodeRegistry && typeof graph.nodeRegistry === "object" ? graph.nodeRegistry : null;
+    if (providedRegistry && Object.keys(providedRegistry).length > 0) {
+      const resolvedRegistry = {};
+      Object.entries(providedRegistry).forEach(([nodeId, node]) => {
+        if (!node || typeof node !== "object") {
+          return;
+        }
+        resolvedRegistry[nodeId] = sanitizeRegistryNode(node, { id: nodeId, label: nodeId });
+      });
+      simulation.sceneGraph.nodeRegistry = resolvedRegistry;
+      simulation.sceneGraph.parentChildEdges = Object.values(resolvedRegistry)
+        .filter((node) => typeof node?.parentId === "string" && node.parentId !== node.id)
+        .map((node) => ({ parentId: node.parentId, childId: node.id }));
+
+      const rootFromRegistry = resolvedRegistry["motor-1"] ?? resolvedRegistry[simulation.sceneGraph.rootNodeId];
+      const drivenFromRegistry = resolvedRegistry["gear-1"]
+        ?? Object.values(resolvedRegistry).find((node) => node?.meshWith === (rootFromRegistry?.id ?? "motor-1") && node.type === "gear");
+      if (rootFromRegistry) {
+        simulation.sceneGraph.canonicalGears["motor-1"] = {
+          showIndicator: rootFromRegistry.showIndicator === true,
+          module: Number.isFinite(rootFromRegistry.module) ? rootFromRegistry.module : 0.1,
+          teeth: Number.isFinite(rootFromRegistry.teeth) ? rootFromRegistry.teeth : 18,
+          radiusMode: rootFromRegistry.radiusMode === "manual" ? "manual" : "moduleTeeth",
+          radius: Number.isFinite(rootFromRegistry.radius) ? rootFromRegistry.radius : 0.9,
+          meshWith: rootFromRegistry.meshWith ?? drivenFromRegistry?.id ?? "gear-1",
+          inputRpm: Number.isFinite(rootFromRegistry.inputRpm) ? rootFromRegistry.inputRpm : 17.2,
+          inputAngularSpeed: Number.isFinite(rootFromRegistry.inputAngularSpeed) ? rootFromRegistry.inputAngularSpeed : 1.8,
+        };
+      }
+      if (drivenFromRegistry) {
+        simulation.sceneGraph.canonicalGears["gear-1"] = {
+          showIndicator: drivenFromRegistry.showIndicator !== false,
+          module: Number.isFinite(drivenFromRegistry.module) ? drivenFromRegistry.module : 0.1,
+          teeth: Number.isFinite(drivenFromRegistry.teeth) ? drivenFromRegistry.teeth : 32,
+          radiusMode: drivenFromRegistry.radiusMode === "manual" ? "manual" : "moduleTeeth",
+          radius: Number.isFinite(drivenFromRegistry.radius) ? drivenFromRegistry.radius : 1.6,
+          meshWith: drivenFromRegistry.meshWith ?? rootFromRegistry?.id ?? "motor-1",
+        };
+      }
+      simulation.sceneGraph.extraGears = Object.values(resolvedRegistry)
+        .filter((node) => node.type === "gear" && node.id !== "gear-1")
+        .map((node, index) => sanitizeExtraGearNode(node, index + 2));
+      simulation.sceneGraph.extraJoints = Object.values(resolvedRegistry)
+        .filter((node) => node.type !== "gear" && node.type !== "motor" && !["linkage-1", "slider-1", "ground-1"].includes(node.id))
+        .map((node, index) => sanitizeExtraJointNode(node, index + 1));
+    }
     if (!simulation.sceneGraph.nodeRegistry?.[simulation.sceneGraph.rootNodeId]) {
       simulation.sceneGraph.rootNodeId = "motor-1";
     }
@@ -1116,8 +1193,9 @@ export function bootstrap() {
     if (!nodeId) {
       return;
     }
+    const nodeRegistryTarget = simulation.sceneGraph.nodeRegistry?.[nodeId];
     const canonical = simulation.sceneGraph.canonicalGears?.[nodeId];
-    const target = canonical ?? simulation.sceneGraph.extraGears.find((node) => node.id === nodeId);
+    const target = nodeRegistryTarget ?? canonical ?? simulation.sceneGraph.extraGears.find((node) => node.id === nodeId);
     if (!target) {
       return;
     }
@@ -1129,6 +1207,9 @@ export function bootstrap() {
       nextValue = rawValue === true;
     }
     target[key] = nextValue;
+    if (nodeRegistryTarget && key === "teeth") {
+      nodeRegistryTarget.toothCount = nextValue;
+    }
     rebuildNodeRegistry();
     syncParamsFromControls();
     renderScene();
@@ -1363,9 +1444,6 @@ export function bootstrap() {
         genesisNodeId: simulation.sceneGraph.genesisNodeId,
         genesisPolicy: simulation.sceneGraph.genesisPolicy,
         nodeRegistry: simulation.sceneGraph.nodeRegistry,
-        canonicalGears: simulation.sceneGraph.canonicalGears,
-        extraGears: simulation.sceneGraph.extraGears,
-        extraJoints: simulation.sceneGraph.extraJoints,
         parentChildEdges: simulation.sceneGraph.parentChildEdges,
       },
       _meta: {
@@ -1622,6 +1700,9 @@ export function bootstrap() {
     }
 
     const nextValue = controls.selection_show_indicator.checked === true;
+    if (simulation.sceneGraph.nodeRegistry?.[selectedId]) {
+      simulation.sceneGraph.nodeRegistry[selectedId].showIndicator = nextValue;
+    }
     if (selectedId === getRootNodeId() || selectedId === getPrimaryDrivenGearId()) {
       simulation.sceneGraph.canonicalGears[selectedId] = {
         ...(simulation.sceneGraph.canonicalGears[selectedId] ?? {}),

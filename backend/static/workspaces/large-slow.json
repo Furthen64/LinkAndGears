@@ -8,29 +8,87 @@
     "rootNodeId": "motor-1",
     "genesisNodeId": "motor-1",
     "genesisPolicy": {
-      "allowedTypes": ["motor", "joint-anchor"]
+      "allowedTypes": [
+        "motor",
+        "joint-anchor"
+      ]
     },
-    "canonicalGears": {
+    "nodeRegistry": {
       "motor-1": {
-        "showIndicator": false,
+        "id": "motor-1",
+        "label": "Motor1",
+        "type": "motor",
+        "parentId": null,
+        "attachmentTargetId": null,
+        "center": {
+          "x": -5.4,
+          "y": 0
+        },
         "module": 0.2,
         "teeth": 18,
         "radiusMode": "moduleTeeth",
         "radius": 1.8,
         "meshWith": "gear-1",
         "inputRpm": null,
-        "inputAngularSpeed": 0.9
+        "inputAngularSpeed": 0.9,
+        "showIndicator": false
       },
       "gear-1": {
-        "showIndicator": true,
+        "id": "gear-1",
+        "label": "Gear1",
+        "type": "gear",
+        "parentId": "motor-1",
+        "attachmentTargetId": "motor-1",
+        "center": {
+          "x": 0,
+          "y": 0
+        },
         "module": 0.2,
         "teeth": 36,
         "radiusMode": "moduleTeeth",
         "radius": 3.6,
-        "meshWith": "motor-1"
+        "meshWith": "motor-1",
+        "showIndicator": true
+      },
+      "linkage-1": {
+        "id": "linkage-1",
+        "label": "Linkage1",
+        "type": "linkage-anchor",
+        "parentId": "gear-1",
+        "attachmentTargetId": "gear-1"
+      },
+      "slider-1": {
+        "id": "slider-1",
+        "label": "Slider1",
+        "type": "slider",
+        "parentId": "linkage-1",
+        "attachmentTargetId": "linkage-1"
+      },
+      "ground-1": {
+        "id": "ground-1",
+        "label": "Ground1",
+        "type": "ground-anchor",
+        "parentId": "linkage-1",
+        "attachmentTargetId": "linkage-1"
       }
     },
-    "extraGears": [],
-    "extraJoints": []
+    "parentChildEdges": [
+      {
+        "parentId": "motor-1",
+        "childId": "gear-1"
+      },
+      {
+        "parentId": "gear-1",
+        "childId": "linkage-1"
+      },
+      {
+        "parentId": "linkage-1",
+        "childId": "slider-1"
+      },
+      {
+        "parentId": "linkage-1",
+        "childId": "ground-1"
+      }
+    ]
   }
 }

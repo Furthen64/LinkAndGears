@@ -185,11 +185,15 @@ function resolveDrivenGearId(params = {}, state = {}, rootGearId = "motor-1") {
 
 function computeGearNodes(params, state) {
   const nominalCenterDistance = params.gear_radius + params.driver_radius;
-  const canonicalGearConfig = params.scene_graph?.canonicalGears ?? {};
+  const registry = params.scene_graph?.nodeRegistry ?? {};
   const rootGearId = resolveGraphRootGearId(params, state);
   const drivenGearId = resolveDrivenGearId(params, state, rootGearId);
+  const rootRegistryNode = registry[rootGearId] ?? {};
+  const drivenRegistryNode = registry[drivenGearId] ?? {};
   const extraGearConfigById = Object.fromEntries(
-    ((params.scene_graph?.extraGears ?? []).filter((node) => typeof node?.id === "string")).map((node) => [node.id, node])
+    Object.values(registry)
+      .filter((node) => node && node.type === "gear" && node.id !== drivenGearId)
+      .map((node) => [node.id, node])
   );
   const defaults = [
     {
@@ -203,7 +207,7 @@ function computeGearNodes(params, state) {
       meshPartnerId: drivenGearId,
       parentId: null,
       role: "driver",
-      showIndicator: canonicalGearConfig?.[rootGearId]?.showIndicator === true,
+      showIndicator: rootRegistryNode?.showIndicator === true,
       drawMotorHub: true,
       drawCenterMarker: false,
     },
@@ -220,7 +224,7 @@ function computeGearNodes(params, state) {
       meshPartnerId: rootGearId,
       parentId: rootGearId,
       role: "driven",
-      showIndicator: canonicalGearConfig?.[drivenGearId]?.showIndicator === false ? false : true,
+      showIndicator: drivenRegistryNode?.showIndicator === false ? false : true,
       drawMotorHub: false,
       drawCenterMarker: true,
     },
