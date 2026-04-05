@@ -341,6 +341,7 @@ export function bootstrap() {
   let activePanPointerId = null;
   let didPanDrag = false;
   let spacePressed = false;
+  let selectedNodeEditorSignature = "";
 
   function makeNode(id, label, children = []) {
     return { id, label, children };
@@ -1292,6 +1293,18 @@ export function bootstrap() {
     }
     const selectedNode = getNodeById(simulation.selectedObjectId);
     const schema = getNodeParamSchema(selectedNode);
+    const nextSignature = selectedNode && schema.length > 0
+      ? JSON.stringify({
+        id: selectedNode.id,
+        type: selectedNode.type,
+        fields: schema.map((field) => [field.key, selectedNode[field.key] ?? field.defaultValue ?? null]),
+      })
+      : "";
+    if (nextSignature === selectedNodeEditorSignature) {
+      return;
+    }
+    selectedNodeEditorSignature = nextSignature;
+
     controls.selected_node_properties.innerHTML = "";
     controls.node_properties_empty.hidden = Boolean(selectedNode && schema.length > 0);
     if (!selectedNode || schema.length === 0) {
