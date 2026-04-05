@@ -180,15 +180,8 @@ function getControls() {
   return {
     play_pause: document.getElementById("play-pause"),
     reset_time: document.getElementById("reset-time"),
-    module: document.getElementById("shared-module"),
-    z1: document.getElementById("driver-teeth-z1"),
-    z2: document.getElementById("driven-teeth-z2"),
-    gear_radius: document.getElementById("gear-radius"),
     crank_radius: document.getElementById("crank-radius"),
-    driver_radius: document.getElementById("driver-radius"),
     rod_length: document.getElementById("rod-length"),
-    motor_rpm: document.getElementById("motor-rpm"),
-    angular_speed: document.getElementById("angular-speed"),
     slider_offset: document.getElementById("slider-offset"),
     slider_axis: document.getElementById("slider-axis"),
     theme_mode: document.getElementById("theme-mode"),
@@ -210,6 +203,8 @@ function getControls() {
     add_joint: document.getElementById("add-joint"),
     delete_selected: document.getElementById("delete-selected"),
     status_debug: document.getElementById("status-debug"),
+    selected_node_properties: document.getElementById("selected-node-properties"),
+    node_properties_empty: document.getElementById("node-properties-empty"),
   };
 }
 
@@ -226,24 +221,25 @@ export function bootstrap() {
   }
 
   const controls = getControls();
-  const CANONICAL_PARAM_SCHEMA = {
-    gear: {
-      module: "shared-module",
-      z1: "driver-teeth-z1",
-      z2: "driven-teeth-z2",
-    },
-    linkage: {
-      gear_radius: "gear-radius",
-      driver_radius: "driver-radius",
-      crank_radius: "crank-radius",
-      rod_length: "rod-length",
-      slider_offset: "slider-offset",
-      slider_axis: "slider-axis",
-    },
-    motion: {
-      motor_rpm: "motor-rpm",
-      angular_speed: "angular-speed",
-    },
+  const NODE_PARAM_SCHEMA = {
+    gear: [
+      { key: "module", label: "Module m", input: "number", step: "0.01", min: "0.001", defaultValue: 0.1 },
+      { key: "teeth", label: "Teeth", input: "number", step: "1", min: "6", defaultValue: 32 },
+      { key: "radiusMode", label: "Radius mode", input: "select", options: ["moduleTeeth", "manual"], defaultValue: "moduleTeeth" },
+      { key: "radius", label: "Radius", input: "number", step: "0.01", min: "0.001", defaultValue: 1.6 },
+      { key: "meshWith", label: "Mesh with node id", input: "text", defaultValue: "motor-1" },
+      { key: "showIndicator", label: "Show indicator", input: "checkbox", defaultValue: true },
+    ],
+    motor: [
+      { key: "module", label: "Module m", input: "number", step: "0.01", min: "0.001", defaultValue: 0.1 },
+      { key: "teeth", label: "Teeth", input: "number", step: "1", min: "6", defaultValue: 18 },
+      { key: "radiusMode", label: "Radius mode", input: "select", options: ["moduleTeeth", "manual"], defaultValue: "moduleTeeth" },
+      { key: "radius", label: "Radius", input: "number", step: "0.01", min: "0.001", defaultValue: 0.9 },
+      { key: "meshWith", label: "Mesh with node id", input: "text", defaultValue: "gear-1" },
+      { key: "showIndicator", label: "Show indicator", input: "checkbox", defaultValue: false },
+      { key: "inputRpm", label: "Motor speed (RPM)", input: "number", step: "0.1", defaultValue: 17.2 },
+      { key: "inputAngularSpeed", label: "Manual angular speed (rad/s)", input: "number", step: "0.1", defaultValue: 1.8 },
+    ],
   };
   const WORKSPACE_PRESETS = {
     default: "/static/workspaces/default.json",
@@ -254,15 +250,8 @@ export function bootstrap() {
   const loadedWorkspacePresets = {};
   const NEW_SCENE_BASELINE_PATH = "/static/workspaces/new-scene.json";
   const NEW_SCENE_FALLBACK = {
-    "shared-module": "0.1",
-    "driver-teeth-z1": "18",
-    "driven-teeth-z2": "32",
-    "gear-radius": "1.6",
-    "driver-radius": "0.9",
     "crank-radius": "1.2",
     "rod-length": "3.2",
-    "motor-rpm": "17.2",
-    "angular-speed": "1.8",
     "slider-offset": "0",
     "slider-axis": "horizontal",
     "theme-mode": "dark",
@@ -273,23 +262,16 @@ export function bootstrap() {
         allowedTypes: ["motor", "joint-anchor"],
       },
       canonicalGears: {
-        "motor-1": { showIndicator: false },
-        "gear-1": { showIndicator: true },
+        "motor-1": { showIndicator: false, module: 0.1, teeth: 18, radiusMode: "moduleTeeth", radius: 0.9, inputRpm: 17.2, inputAngularSpeed: 1.8, meshWith: "gear-1" },
+        "gear-1": { showIndicator: true, module: 0.1, teeth: 32, radiusMode: "moduleTeeth", radius: 1.6, meshWith: "motor-1" },
       },
       extraGears: [],
       extraJoints: [],
     },
   };
   const SCENE_EXPORT_CONTROL_IDS = [
-    "shared-module",
-    "driver-teeth-z1",
-    "driven-teeth-z2",
-    "gear-radius",
-    "driver-radius",
     "crank-radius",
     "rod-length",
-    "motor-rpm",
-    "angular-speed",
     "slider-offset",
     "slider-axis",
     "theme-mode",
@@ -312,8 +294,8 @@ export function bootstrap() {
         allowedTypes: ["motor", "joint-anchor"],
       },
       canonicalGears: {
-        "motor-1": { showIndicator: false },
-        "gear-1": { showIndicator: true },
+        "motor-1": { showIndicator: false, module: 0.1, teeth: 18, radiusMode: "moduleTeeth", radius: 0.9, inputRpm: 17.2, inputAngularSpeed: 1.8, meshWith: "gear-1" },
+        "gear-1": { showIndicator: true, module: 0.1, teeth: 32, radiusMode: "moduleTeeth", radius: 1.6, meshWith: "motor-1" },
       },
       extraGears: [],
       extraJoints: [],
@@ -373,21 +355,44 @@ export function bootstrap() {
   }
 
   function canonicalGearNodes() {
-    const centerDistance = simulation.params.driver_radius + simulation.params.gear_radius;
+    const motorConfig = simulation.sceneGraph.canonicalGears?.["motor-1"] ?? {};
+    const drivenConfig = simulation.sceneGraph.canonicalGears?.["gear-1"] ?? {};
+    const resolveRadius = (config, fallback) => {
+      const moduleValue = Number(config.module);
+      const teethValue = Number(config.teeth);
+      if (config.radiusMode !== "manual" && Number.isFinite(moduleValue) && moduleValue > 0 && Number.isFinite(teethValue) && teethValue > 0) {
+        return (moduleValue * teethValue) / 2;
+      }
+      const radiusValue = Number(config.radius);
+      return Number.isFinite(radiusValue) && radiusValue > 0 ? radiusValue : fallback;
+    };
+    const motorRadius = resolveRadius(motorConfig, 0.9);
+    const drivenRadius = resolveRadius(drivenConfig, 1.6);
+    const centerDistance = motorRadius + drivenRadius;
     return {
       "motor-1": {
         id: "motor-1",
         label: "Motor1",
         center: { x: -centerDistance, y: 0 },
-        radius: simulation.params.driver_radius,
-        showIndicator: simulation.sceneGraph.canonicalGears?.["motor-1"]?.showIndicator === true,
+        radius: motorRadius,
+        showIndicator: motorConfig.showIndicator === true,
+        module: Number(motorConfig.module),
+        teeth: Number(motorConfig.teeth),
+        radiusMode: motorConfig.radiusMode ?? "moduleTeeth",
+        meshWith: motorConfig.meshWith ?? "gear-1",
+        inputRpm: Number(motorConfig.inputRpm),
+        inputAngularSpeed: Number(motorConfig.inputAngularSpeed),
       },
       "gear-1": {
         id: "gear-1",
         label: "Gear1",
         center: { x: 0, y: 0 },
-        radius: simulation.params.gear_radius,
-        showIndicator: simulation.sceneGraph.canonicalGears?.["gear-1"]?.showIndicator === true,
+        radius: drivenRadius,
+        showIndicator: drivenConfig.showIndicator !== false,
+        module: Number(drivenConfig.module),
+        teeth: Number(drivenConfig.teeth),
+        radiusMode: drivenConfig.radiusMode ?? "moduleTeeth",
+        meshWith: drivenConfig.meshWith ?? "motor-1",
       },
     };
   }
@@ -401,7 +406,7 @@ export function bootstrap() {
         type: "motor",
         parentId: null,
         attachmentTargetId: null,
-        meshWith: "gear-1",
+        meshWith: gears["motor-1"].meshWith ?? simulation.sceneGraph.canonicalGears?.["motor-1"]?.meshWith ?? "gear-1",
         ...gears["motor-1"],
       },
       "gear-1": {
@@ -410,7 +415,7 @@ export function bootstrap() {
         type: "gear",
         parentId: "motor-1",
         attachmentTargetId: "motor-1",
-        meshWith: "motor-1",
+        meshWith: gears["gear-1"].meshWith ?? simulation.sceneGraph.canonicalGears?.["gear-1"]?.meshWith ?? "motor-1",
         ...gears["gear-1"],
       },
       "linkage-1": {
@@ -618,7 +623,7 @@ export function bootstrap() {
     const id = rawNode?.id ?? `gear-${fallbackIndex}`;
     const label = rawNode?.label ?? `Gear${fallbackIndex}`;
     const moduleValue = toPositiveFinite(Number(rawNode?.module), toPositiveFinite(simulation.params.module, 0.1));
-    const teethValue = Math.max(1, Math.round(toPositiveFinite(Number(rawNode?.teeth ?? rawNode?.toothCount), Number(controls.z2?.value) || 24)));
+    const teethValue = Math.max(1, Math.round(toPositiveFinite(Number(rawNode?.teeth ?? rawNode?.toothCount), 24)));
     const providedRadius = Number(rawNode?.radius);
     const derivedRadius = (moduleValue * teethValue) / 2;
     const radiusValue = toPositiveFinite(providedRadius, derivedRadius);
@@ -630,6 +635,7 @@ export function bootstrap() {
       meshWith: typeof rawNode?.meshWith === "string" ? rawNode.meshWith : null,
       module: moduleValue,
       teeth: teethValue,
+      radiusMode: rawNode?.radiusMode === "manual" ? "manual" : "moduleTeeth",
       radius: radiusValue,
       centerMode: rawNode?.centerMode === "manual" ? "manual" : "mesh",
       center: {
@@ -691,13 +697,45 @@ export function bootstrap() {
   }
 
   function applySceneGraphConfig(sceneConfig) {
-    const graph = sceneConfig?.sceneGraph ?? sceneConfig?.scene_graph ?? {};
+    const graph = sceneConfig?.sceneGraph ?? {};
     const inputExtraGears = Array.isArray(graph.extraGears) ? graph.extraGears : [];
     const inputExtraJoints = Array.isArray(graph.extraJoints) ? graph.extraJoints : [];
-    const canonicalGears = graph.canonicalGears ?? graph.canonical_gears ?? {};
+    const canonicalGears = graph.canonicalGears ?? {};
     simulation.sceneGraph.canonicalGears = {
-      "motor-1": { showIndicator: canonicalGears?.["motor-1"]?.showIndicator === true },
-      "gear-1": { showIndicator: canonicalGears?.["gear-1"]?.showIndicator === false ? false : true },
+      "motor-1": {
+        showIndicator: canonicalGears?.["motor-1"]?.showIndicator === true,
+        module: Number.isFinite(Number(canonicalGears?.["motor-1"]?.module))
+          ? Number(canonicalGears?.["motor-1"]?.module)
+          : 0.1,
+        teeth: Number.isFinite(Number(canonicalGears?.["motor-1"]?.teeth))
+          ? Number(canonicalGears?.["motor-1"]?.teeth)
+          : 18,
+        radiusMode: canonicalGears?.["motor-1"]?.radiusMode === "manual" ? "manual" : "moduleTeeth",
+        radius: Number.isFinite(Number(canonicalGears?.["motor-1"]?.radius))
+          ? Number(canonicalGears?.["motor-1"]?.radius)
+          : 0.9,
+        meshWith: canonicalGears?.["motor-1"]?.meshWith ?? "gear-1",
+        inputRpm: Number.isFinite(Number(canonicalGears?.["motor-1"]?.inputRpm))
+          ? Number(canonicalGears?.["motor-1"]?.inputRpm)
+          : 17.2,
+        inputAngularSpeed: Number.isFinite(Number(canonicalGears?.["motor-1"]?.inputAngularSpeed))
+          ? Number(canonicalGears?.["motor-1"]?.inputAngularSpeed)
+          : 1.8,
+      },
+      "gear-1": {
+        showIndicator: canonicalGears?.["gear-1"]?.showIndicator === false ? false : true,
+        module: Number.isFinite(Number(canonicalGears?.["gear-1"]?.module))
+          ? Number(canonicalGears?.["gear-1"]?.module)
+          : 0.1,
+        teeth: Number.isFinite(Number(canonicalGears?.["gear-1"]?.teeth))
+          ? Number(canonicalGears?.["gear-1"]?.teeth)
+          : 32,
+        radiusMode: canonicalGears?.["gear-1"]?.radiusMode === "manual" ? "manual" : "moduleTeeth",
+        radius: Number.isFinite(Number(canonicalGears?.["gear-1"]?.radius))
+          ? Number(canonicalGears?.["gear-1"]?.radius)
+          : 1.6,
+        meshWith: canonicalGears?.["gear-1"]?.meshWith ?? "motor-1",
+      },
     };
     simulation.sceneGraph.extraGears = inputExtraGears.map((node, index) => sanitizeExtraGearNode(node, index + 2));
     simulation.sceneGraph.extraJoints = inputExtraJoints.map((node, index) => sanitizeExtraJointNode(node, index + 1));
@@ -966,57 +1004,42 @@ export function bootstrap() {
   }
 
   function normalizeControlParams() {
+    const motorNode = canonicalGearNodes()["motor-1"];
+    const drivenNode = canonicalGearNodes()["gear-1"];
+    const motorRpmInput = Number(motorNode.inputRpm);
+    const motorAngularInput = Number(motorNode.inputAngularSpeed);
+    const hasRpmInput = Number.isFinite(motorRpmInput);
+    const angularSpeedFromRpm = hasRpmInput ? (2 * Math.PI * motorRpmInput) / 60 : Number.NaN;
+    const resolvedModule = Number.isFinite(Number(motorNode.module)) && Number(motorNode.module) > 0
+      ? Number(motorNode.module)
+      : Number(drivenNode.module);
     const parsed = {
-      module: parseOptionalNumber(controls.module),
-      z1: parseOptionalNumber(controls.z1),
-      z2: parseOptionalNumber(controls.z2),
-      gear_radius: Number(controls.gear_radius?.value ?? 1.6),
-      driver_radius: Number(controls.driver_radius?.value ?? 0.9),
       crank_radius: Number(controls.crank_radius?.value ?? 1.2),
       rod_length: Number(controls.rod_length?.value ?? 3.2),
-      motor_rpm: parseOptionalNumber(controls.motor_rpm),
-      angular_speed: Number(controls.angular_speed?.value ?? 1.8),
       slider_offset: Number(controls.slider_offset?.value ?? 0),
       slider_axis: controls.slider_axis?.value === "vertical" ? "vertical" : "horizontal",
     };
-
-    const usesCanonicalGearSet =
-      Number.isFinite(parsed.module.value) &&
-      parsed.module.value > 0 &&
-      Number.isFinite(parsed.z1.value) &&
-      parsed.z1.value > 0 &&
-      Number.isFinite(parsed.z2.value) &&
-      parsed.z2.value > 0;
-
-    const driver_pitch_diameter = usesCanonicalGearSet
-      ? parsed.module.value * parsed.z1.value
-      : parsed.driver_radius * 2;
-    const driven_pitch_diameter = usesCanonicalGearSet
-      ? parsed.module.value * parsed.z2.value
-      : parsed.gear_radius * 2;
-    const computed_driver_radius = driver_pitch_diameter / 2;
-    const computed_gear_radius = driven_pitch_diameter / 2;
-    const hasRpmInput = parsed.motor_rpm.present && Number.isFinite(parsed.motor_rpm.value);
-    const angularSpeedFromRpm = hasRpmInput ? (2 * Math.PI * parsed.motor_rpm.value) / 60 : Number.NaN;
+    const driver_pitch_diameter = motorNode.radius * 2;
+    const driven_pitch_diameter = drivenNode.radius * 2;
 
     return {
       params: {
         ...simulation.params,
-        param_schema: CANONICAL_PARAM_SCHEMA,
-        raw_module: parsed.module.value,
-        raw_driver_teeth: parsed.z1.value,
-        raw_driven_teeth: parsed.z2.value,
-        module: usesCanonicalGearSet ? parsed.module.value : Number.NaN,
-        driver_teeth: usesCanonicalGearSet ? parsed.z1.value : Number.NaN,
-        driven_teeth: usesCanonicalGearSet ? parsed.z2.value : Number.NaN,
+        param_schema: NODE_PARAM_SCHEMA,
+        raw_module: resolvedModule,
+        raw_driver_teeth: motorNode.teeth,
+        raw_driven_teeth: drivenNode.teeth,
+        module: resolvedModule,
+        driver_teeth: motorNode.teeth,
+        driven_teeth: drivenNode.teeth,
         driver_pitch_diameter,
         driven_pitch_diameter,
-        gear_radius: usesCanonicalGearSet ? computed_gear_radius : parsed.gear_radius,
-        driver_radius: usesCanonicalGearSet ? computed_driver_radius : parsed.driver_radius,
+        gear_radius: drivenNode.radius,
+        driver_radius: motorNode.radius,
         crank_radius: parsed.crank_radius,
         rod_length: parsed.rod_length,
-        motor_rpm: hasRpmInput ? parsed.motor_rpm.value : Number.NaN,
-        angular_speed: hasRpmInput ? angularSpeedFromRpm : parsed.angular_speed,
+        motor_rpm: hasRpmInput ? motorRpmInput : Number.NaN,
+        angular_speed: hasRpmInput ? angularSpeedFromRpm : motorAngularInput,
         slider_offset: parsed.slider_offset,
         slider_axis: parsed.slider_axis,
       },
@@ -1063,6 +1086,88 @@ export function bootstrap() {
     }
   }
 
+  function getNodeById(nodeId) {
+    return simulation.sceneGraph.nodeRegistry?.[nodeId] ?? null;
+  }
+
+  function getNodeParamSchema(node) {
+    const nodeType = normalizeNodeType(node?.type);
+    return NODE_PARAM_SCHEMA[nodeType] ?? (nodeType === "gear" ? NODE_PARAM_SCHEMA.gear : []);
+  }
+
+  function updateSelectedNodeParam(nodeId, key, rawValue) {
+    if (!nodeId) {
+      return;
+    }
+    const canonical = simulation.sceneGraph.canonicalGears?.[nodeId];
+    const target = canonical ?? simulation.sceneGraph.extraGears.find((node) => node.id === nodeId);
+    if (!target) {
+      return;
+    }
+    let nextValue = rawValue;
+    if (typeof rawValue === "string" && ["module", "teeth", "radius", "inputRpm", "inputAngularSpeed"].includes(key)) {
+      nextValue = Number(rawValue);
+    }
+    if (key === "showIndicator") {
+      nextValue = rawValue === true;
+    }
+    target[key] = nextValue;
+    rebuildNodeRegistry();
+    syncParamsFromControls();
+    renderScene();
+  }
+
+  function renderSelectedNodePropertiesEditor() {
+    if (!controls.selected_node_properties || !controls.node_properties_empty) {
+      return;
+    }
+    const selectedNode = getNodeById(simulation.selectedObjectId);
+    const schema = getNodeParamSchema(selectedNode);
+    controls.selected_node_properties.innerHTML = "";
+    controls.node_properties_empty.hidden = Boolean(selectedNode && schema.length > 0);
+    if (!selectedNode || schema.length === 0) {
+      return;
+    }
+    schema.forEach((field) => {
+      const row = document.createElement("label");
+      row.textContent = field.label;
+      let input;
+      if (field.input === "select") {
+        input = document.createElement("select");
+        (field.options ?? []).forEach((optionValue) => {
+          const option = document.createElement("option");
+          option.value = optionValue;
+          option.textContent = optionValue;
+          input.appendChild(option);
+        });
+        input.value = String(selectedNode[field.key] ?? field.defaultValue ?? "");
+      } else {
+        input = document.createElement("input");
+        input.type = field.input;
+        if (field.step != null) {
+          input.step = String(field.step);
+        }
+        if (field.min != null) {
+          input.min = String(field.min);
+        }
+        if (field.max != null) {
+          input.max = String(field.max);
+        }
+        if (field.input === "checkbox") {
+          input.checked = selectedNode[field.key] === true;
+        } else {
+          input.value = String(selectedNode[field.key] ?? field.defaultValue ?? "");
+        }
+      }
+      input.addEventListener("input", () => {
+        const nextValue = field.input === "checkbox" ? input.checked : input.value;
+        updateSelectedNodeParam(selectedNode.id, field.key, nextValue);
+      });
+      row.appendChild(input);
+      controls.selected_node_properties.appendChild(row);
+    });
+  }
+
   function updateSelectionPanel(state) {
     if (!controls.selection_name || !controls.selection_details) {
       return;
@@ -1090,6 +1195,7 @@ export function bootstrap() {
       controls.selection_show_indicator.disabled = !canEditIndicator;
       controls.selection_show_indicator.checked = selectedGearNode?.showIndicator === true;
     }
+    renderSelectedNodePropertiesEditor();
 
     if (simulation.sceneTreeDirty) {
       renderSceneTree();
@@ -1187,15 +1293,8 @@ export function bootstrap() {
     }
 
     [
-      "shared-module",
-      "driver-teeth-z1",
-      "driven-teeth-z2",
-      "gear-radius",
-      "driver-radius",
       "crank-radius",
       "rod-length",
-      "motor-rpm",
-      "angular-speed",
       "slider-axis",
       "slider-offset",
     ].forEach((controlId) => {
@@ -1315,15 +1414,8 @@ export function bootstrap() {
   }
 
   [
-    controls.module,
-    controls.z1,
-    controls.z2,
-    controls.gear_radius,
     controls.crank_radius,
-    controls.driver_radius,
     controls.rod_length,
-    controls.motor_rpm,
-    controls.angular_speed,
     controls.slider_offset,
     controls.slider_axis,
   ].forEach(attachLiveUpdates);
@@ -1367,8 +1459,8 @@ export function bootstrap() {
       allowedTypes: ["motor", "joint-anchor"],
     };
     simulation.sceneGraph.canonicalGears = {
-      "motor-1": { showIndicator: false },
-      "gear-1": { showIndicator: true },
+      "motor-1": { showIndicator: false, module: 0.1, teeth: 18, radiusMode: "moduleTeeth", radius: 0.9, inputRpm: 17.2, inputAngularSpeed: 1.8, meshWith: "gear-1" },
+      "gear-1": { showIndicator: true, module: 0.1, teeth: 32, radiusMode: "moduleTeeth", radius: 1.6, meshWith: "motor-1" },
     };
     simulation.sceneGraph.extraGears = [];
     simulation.sceneGraph.extraJoints = [];
@@ -1409,8 +1501,8 @@ export function bootstrap() {
     syncParamsFromControls();
     const index = getNextDynamicNodeIndex("gear", simulation.sceneGraph.extraGears);
     const id = `gear-${index}`;
-    const canonicalModule = toPositiveFinite(Number(controls.module?.value), toPositiveFinite(simulation.params.module, 0.1));
-    const canonicalDrivenTeeth = Math.max(1, Math.round(toPositiveFinite(Number(controls.z2?.value), 24)));
+    const canonicalModule = toPositiveFinite(Number(simulation.sceneGraph.canonicalGears?.["gear-1"]?.module), toPositiveFinite(simulation.params.module, 0.1));
+    const canonicalDrivenTeeth = Math.max(1, Math.round(toPositiveFinite(Number(simulation.sceneGraph.canonicalGears?.["gear-1"]?.teeth), 24)));
     const radius = (canonicalModule * canonicalDrivenTeeth) / 2;
     const selectedIsGear = typeof simulation.selectedObjectId === "string" && (simulation.selectedObjectId === getPrimaryDrivenGearId() || /^gear-\d+$/.test(simulation.selectedObjectId));
 
@@ -1512,7 +1604,10 @@ export function bootstrap() {
 
     const nextValue = controls.selection_show_indicator.checked === true;
     if (selectedId === getRootNodeId() || selectedId === getPrimaryDrivenGearId()) {
-      simulation.sceneGraph.canonicalGears[selectedId] = { showIndicator: nextValue };
+      simulation.sceneGraph.canonicalGears[selectedId] = {
+        ...(simulation.sceneGraph.canonicalGears[selectedId] ?? {}),
+        showIndicator: nextValue,
+      };
     } else {
       const gearNode = simulation.sceneGraph.extraGears.find((node) => node.id === selectedId);
       if (!gearNode) {

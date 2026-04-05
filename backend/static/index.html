@@ -64,26 +64,13 @@
 
       <section class="controls-panel" aria-label="Mechanism controls">
         <h2>Controls</h2>
-        <p class="controls-legend controls-legend--editable">Editable: these values are direct user inputs.</p>
+        <p class="controls-legend controls-legend--editable">Editable: global scene controls and selected-node properties.</p>
         <label>
-          Module m (shared across all gears)
-          <input id="shared-module" type="number" value="0.1" />
-        </label>
-        <label>
-          Driver teeth z1
-          <input id="driver-teeth-z1" type="number" value="18" />
-        </label>
-        <label>
-          Driven teeth z2
-          <input id="driven-teeth-z2" type="number" value="32" />
-        </label>
-        <label>
-          Gear radius
-          <input id="gear-radius" type="number" value="1.6" />
-        </label>
-        <label>
-          Driver gear radius
-          <input id="driver-radius" type="number" value="0.9" />
+          Theme
+          <select id="theme-mode">
+            <option value="dark" selected>Darkmode</option>
+            <option value="light">Light</option>
+          </select>
         </label>
         <label>
           Crank radius
@@ -93,15 +80,6 @@
           Rod length
           <input id="rod-length" type="number" value="3.2" />
         </label>
-        <label>
-          Motor speed (RPM)
-          <input id="motor-rpm" type="number" value="17.2" />
-        </label>
-        <label>
-          Manual angular speed (rad/s, used when RPM is blank)
-          <input id="angular-speed" type="number" value="1.8" />
-        </label>
-        <p class="controls-legend">Motor RPM overrides manual angular speed whenever RPM is filled in.</p>
         <label>
           Slider offset
           <input id="slider-offset" type="number" step="0.1" value="0" />
@@ -113,13 +91,11 @@
             <option value="vertical">Vertical</option>
           </select>
         </label>
-        <label>
-          Theme
-          <select id="theme-mode">
-            <option value="dark" selected>Darkmode</option>
-            <option value="light">Light</option>
-          </select>
-        </label>
+        <section class="selection-panel">
+          <h3>Selected Node Properties</h3>
+          <p id="node-properties-empty">Select a node to edit its properties.</p>
+          <div id="selected-node-properties"></div>
+        </section>
 
         <section class="derived-panel" aria-label="Derived read-only values">
           <h3>Derived values (read only)</h3>

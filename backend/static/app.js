@@ -1,9 +1,9 @@
 import { bootstrap } from "./controller.js";
 
 export const CANONICAL_PARAM_SCHEMA = {
-  gear: ["module", "z1", "z2"],
-  linkage: ["gear_radius", "driver_radius", "crank_radius", "rod_length", "slider_offset", "slider_axis"],
-  motion: ["motor_rpm", "angular_speed"],
+  gear: ["module", "teeth", "radiusMode", "radius", "meshWith", "showIndicator"],
+  motor: ["module", "teeth", "radiusMode", "radius", "meshWith", "showIndicator", "inputRpm", "inputAngularSpeed"],
+  scene: ["crank_radius", "rod_length", "slider_offset", "slider_axis", "theme-mode"],
 };
 
 if (typeof globalThis !== "undefined") {
