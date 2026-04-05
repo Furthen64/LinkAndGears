@@ -28,7 +28,7 @@
         "teeth": 14,
         "radiusMode": "moduleTeeth",
         "radius": 0.56,
-        "meshWith": "gear-1",
+        "meshWith": null,
         "inputRpm": 26,
         "inputAngularSpeed": 2.6,
         "showIndicator": false

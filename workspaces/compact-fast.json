@@ -8,7 +8,10 @@
     "rootNodeId": "motor-1",
     "genesisNodeId": "motor-1",
     "genesisPolicy": {
-      "allowedTypes": ["motor", "joint-anchor"]
+      "allowedTypes": [
+        "motor",
+        "joint-anchor"
+      ]
     },
     "canonicalGears": {
       "motor-1": {
@@ -17,7 +20,7 @@
         "teeth": 14,
         "radiusMode": "moduleTeeth",
         "radius": 0.56,
-        "meshWith": "gear-1",
+        "meshWith": null,
         "inputRpm": 26,
         "inputAngularSpeed": 2.6
       },
