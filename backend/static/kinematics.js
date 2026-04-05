@@ -27,6 +27,37 @@ function getNodeCenter(node) {
   };
 }
 
+function resolveGraphRootGear(sceneGraph = {}) {
+  const registry = sceneGraph.nodeRegistry ?? {};
+  const rootId = typeof sceneGraph.rootNodeId === "string" ? sceneGraph.rootNodeId : "motor-1";
+  const rootNode = registry[rootId];
+  if (rootNode && (rootNode.type === "motor" || rootNode.type === "gear")) {
+    return rootId;
+  }
+  if (registry["motor-1"]) {
+    return "motor-1";
+  }
+  return rootId;
+}
+
+function resolvePrimaryDrivenGear(sceneGraph = {}, rootId = "motor-1") {
+  const registry = sceneGraph.nodeRegistry ?? {};
+  const rootNode = registry[rootId];
+  if (!rootNode) {
+    return "gear-1";
+  }
+
+  const child = Object.values(registry).find((node) => {
+    if (!node || node.id === rootId) {
+      return false;
+    }
+    const attachment = node.meshWith ?? node.parentId ?? node.attachmentTargetId;
+    return attachment === rootId && (node.type === "gear" || node.role === "driven");
+  });
+
+  return child?.id ?? (registry["gear-1"] ? "gear-1" : rootId);
+}
+
 export function validateGearParams(params) {
   const moduleInput = params.raw_module;
   const driverTeethInput = params.raw_driver_teeth;
@@ -294,33 +325,39 @@ export function computeState(params, t) {
     ? center_distance
     : driver_radius + params.gear_radius;
   const canonicalGearConfig = params.scene_graph?.canonicalGears ?? {};
+  const rootGearId = resolveGraphRootGear(params.scene_graph);
+  const drivenGearId = resolvePrimaryDrivenGear(params.scene_graph, rootGearId);
+  const rootRegistryNode = params.scene_graph?.nodeRegistry?.[rootGearId];
+  const drivenRegistryNode = params.scene_graph?.nodeRegistry?.[drivenGearId];
 
   const sceneState = computeSceneState(
     {
       gears: [
         {
-          id: "motor-1",
-          radius: driver_radius,
+          id: rootGearId,
+          radius: Number.isFinite(rootRegistryNode?.radius) ? rootRegistryNode.radius : driver_radius,
           angle: initial_angle,
           angularSpeed: angular_speed,
-          center: { x: -canonicalCenterDistance, y: 0 },
+          center: rootRegistryNode?.center ?? { x: -canonicalCenterDistance, y: 0 },
           module: params.module,
           toothCount: params.driver_teeth,
           role: "driver",
-          showIndicator: canonicalGearConfig?.["motor-1"]?.showIndicator === true,
+          showIndicator: canonicalGearConfig?.[rootGearId]?.showIndicator === true,
         },
-        {
-          id: "gear-1",
-          meshWith: "motor-1",
-          radius: params.gear_radius,
-          angle: 0,
-          phaseOffset: 0,
-          module: params.module,
-          toothCount: params.driven_teeth,
-          role: "driven",
-          center: { x: 0, y: 0 },
-          showIndicator: canonicalGearConfig?.["gear-1"]?.showIndicator === false ? false : true,
-        },
+        ...(drivenGearId !== rootGearId
+          ? [{
+              id: drivenGearId,
+              meshWith: rootGearId,
+              radius: Number.isFinite(drivenRegistryNode?.radius) ? drivenRegistryNode.radius : params.gear_radius,
+              angle: 0,
+              phaseOffset: 0,
+              module: params.module,
+              toothCount: params.driven_teeth,
+              role: "driven",
+              center: drivenRegistryNode?.center ?? { x: 0, y: 0 },
+              showIndicator: canonicalGearConfig?.[drivenGearId]?.showIndicator === false ? false : true,
+            }]
+          : []),
         ...((params.scene_graph?.extraGears ?? []).map((node) => ({
           id: node.id,
           angle: toFiniteNumber(node.angle, 0),
@@ -353,8 +390,8 @@ export function computeState(params, t) {
     };
   }
 
-  const driverTheta = sceneState.gearsById["motor-1"].angle;
-  const drivenTheta = sceneState.gearsById["gear-1"].angle;
+  const driverTheta = sceneState.gearsById[rootGearId]?.angle ?? Number.NaN;
+  const drivenTheta = sceneState.gearsById[drivenGearId]?.angle ?? Number.NaN;
   const theta = drivenTheta + crank_angle_offset;
 
   const gearNodes = Object.values(sceneState.gearsById).map((node, index) => ({
@@ -369,8 +406,8 @@ export function computeState(params, t) {
     meshPartnerId: node.meshWith ?? null,
     role: node.role,
     showIndicator: node.showIndicator === true,
-    drawCenterMarker: node.id !== "motor-1",
-    drawMotorHub: node.id === "motor-1",
+    drawCenterMarker: node.id !== rootGearId,
+    drawMotorHub: node.id === rootGearId,
     zIndex: index,
   }));
 
@@ -383,6 +420,8 @@ export function computeState(params, t) {
     valid: true,
     gear_angle: drivenTheta,
     driver_angle: driverTheta,
+    rootGearId,
+    drivenGearId,
     gearsById: sceneState.gearsById,
     gearNodes,
     jointsById: sceneState.jointsById,

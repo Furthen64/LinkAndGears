@@ -156,33 +156,57 @@ function normalizeGearNode(rawNode, fallback, index = 0) {
 }
 
 function getGearToothPhaseOffset(node, geometry) {
-  return node.id === "motor-1" || node.role === "driver" ? Math.PI / geometry.toothCount : 0;
+  return node.role === "driver" ? Math.PI / geometry.toothCount : 0;
+}
+
+function resolveGraphRootGearId(params = {}, state = {}) {
+  if (typeof state?.rootGearId === "string") {
+    return state.rootGearId;
+  }
+  const graph = params.scene_graph ?? {};
+  const rootId = typeof graph.rootNodeId === "string" ? graph.rootNodeId : "motor-1";
+  return graph.nodeRegistry?.[rootId] ? rootId : "motor-1";
+}
+
+function resolveDrivenGearId(params = {}, state = {}, rootGearId = "motor-1") {
+  if (typeof state?.drivenGearId === "string") {
+    return state.drivenGearId;
+  }
+  const graph = params.scene_graph ?? {};
+  const registry = graph.nodeRegistry ?? {};
+  const driven = Object.values(registry).find((node) => {
+    const attachment = node?.meshWith ?? node?.parentId ?? node?.attachmentTargetId;
+    return attachment === rootGearId && node?.type === "gear";
+  });
+  return driven?.id ?? (registry["gear-1"] ? "gear-1" : rootGearId);
 }
 
 function computeGearNodes(params, state) {
   const nominalCenterDistance = params.gear_radius + params.driver_radius;
   const canonicalGearConfig = params.scene_graph?.canonicalGears ?? {};
+  const rootGearId = resolveGraphRootGearId(params, state);
+  const drivenGearId = resolveDrivenGearId(params, state, rootGearId);
   const extraGearConfigById = Object.fromEntries(
     ((params.scene_graph?.extraGears ?? []).filter((node) => typeof node?.id === "string")).map((node) => [node.id, node])
   );
   const defaults = [
     {
-      id: "motor-1",
+      id: rootGearId,
       center: { x: -nominalCenterDistance, y: 0 },
       radius: params.driver_radius,
       toothCount: params.driver_teeth,
       angle: state.driver_angle,
       angularSpeed: params.angular_speed,
       module: params.module,
-      meshPartnerId: "gear-1",
+      meshPartnerId: drivenGearId,
       parentId: null,
       role: "driver",
-      showIndicator: canonicalGearConfig?.["motor-1"]?.showIndicator === true,
+      showIndicator: canonicalGearConfig?.[rootGearId]?.showIndicator === true,
       drawMotorHub: true,
       drawCenterMarker: false,
     },
     {
-      id: "gear-1",
+      id: drivenGearId,
       center: { x: 0, y: 0 },
       radius: params.gear_radius,
       toothCount: params.driven_teeth,
@@ -191,10 +215,10 @@ function computeGearNodes(params, state) {
         ? -(params.angular_speed * params.driver_radius) / params.gear_radius
         : Number.NaN,
       module: params.module,
-      meshPartnerId: "motor-1",
-      parentId: "motor-1",
+      meshPartnerId: rootGearId,
+      parentId: rootGearId,
       role: "driven",
-      showIndicator: canonicalGearConfig?.["gear-1"]?.showIndicator === false ? false : true,
+      showIndicator: canonicalGearConfig?.[drivenGearId]?.showIndicator === false ? false : true,
       drawMotorHub: false,
       drawCenterMarker: true,
     },
@@ -232,7 +256,7 @@ function computeGearNodes(params, state) {
 }
 
 function drawGearNode(ctx, transform, params, scene, node) {
-  const style = node.renderStyle ?? (node.id === "motor-1" || node.role === "driver" ? scene.driverGear : scene.gear);
+  const style = node.renderStyle ?? (node.role === "driver" ? scene.driverGear : scene.gear);
   const geometry = getGearGeometry(node.radius, params, style, transform, node.toothCount);
   const centerCanvas = transform.toCanvas(node.center);
   const toothPhaseOffset = getGearToothPhaseOffset(node, geometry);
@@ -452,7 +476,10 @@ export function objectDetails(selection, params, state) {
     };
   }
 
-  if (selection === "gear" || selection === "gear-1") {
+  const rootGearId = resolveGraphRootGearId(params, state);
+  const drivenGearId = resolveDrivenGearId(params, state, rootGearId);
+
+  if (selection === "gear" || selection === drivenGearId) {
     return {
       title: "Gear",
       details: [
@@ -468,7 +495,7 @@ export function objectDetails(selection, params, state) {
     };
   }
 
-  if (selection === "motor" || selection === "motor-1") {
+  if (selection === "motor" || selection === rootGearId) {
     return {
       title: "Motor gear",
       details: [
@@ -561,7 +588,9 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
     drawGearIndicator(ctx, scene, node, centerCanvas, geometry, params.angular_speed);
   });
 
-  const drivenGear = renderedGears.find((entry) => entry.node.id === "gear-1")
+  const rootGearId = resolveGraphRootGearId(params, state);
+  const drivenGearId = resolveDrivenGearId(params, state, rootGearId);
+  const drivenGear = renderedGears.find((entry) => entry.node.id === drivenGearId)
     ?? renderedGears.find((entry) => entry.node.role !== "driver")
     ?? renderedGears[0];
   const center = drivenGear?.centerCanvas ?? t.toCanvas({ x: 0, y: 0 });
@@ -603,7 +632,7 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
   const activeSlotStroke = isLightTheme ? "#0c4a6e" : "#cffafe";
   const slotRadiusPx = 9;
   const selectedGear = renderedGears.find(
-    (entry) => entry.node.id === selectedObject || (selectedObject === "motor" && entry.node.id === "motor-1")
+    (entry) => entry.node.id === selectedObject || (selectedObject === "motor" && entry.node.id === rootGearId)
   );
   const slotRegions = [];
   if (selectedGear) {

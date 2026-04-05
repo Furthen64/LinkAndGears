@@ -10,5 +10,50 @@
   "angular-speed": "1.8",
   "slider-offset": "0",
   "slider-axis": "horizontal",
-  "theme-mode": "dark"
+  "theme-mode": "dark",
+  "sceneGraph": {
+    "rootNodeId": "motor-1",
+    "genesisNodeId": "motor-1",
+    "genesisPolicy": {
+      "allowedTypes": ["motor", "joint-anchor"]
+    },
+    "nodeRegistry": {
+      "motor-1": {
+        "id": "motor-1",
+        "label": "Motor1",
+        "type": "motor",
+        "attachmentTargetId": null
+      },
+      "gear-1": {
+        "id": "gear-1",
+        "label": "Gear1",
+        "type": "gear",
+        "attachmentTargetId": "motor-1"
+      },
+      "linkage-1": {
+        "id": "linkage-1",
+        "label": "Linkage1",
+        "type": "linkage-anchor",
+        "attachmentTargetId": "gear-1"
+      },
+      "slider-1": {
+        "id": "slider-1",
+        "label": "Slider1",
+        "type": "slider",
+        "attachmentTargetId": "linkage-1"
+      },
+      "ground-1": {
+        "id": "ground-1",
+        "label": "Ground1",
+        "type": "ground-anchor",
+        "attachmentTargetId": "linkage-1"
+      }
+    },
+    "canonicalGears": {
+      "motor-1": { "showIndicator": false },
+      "gear-1": { "showIndicator": true }
+    },
+    "extraGears": [],
+    "extraJoints": []
+  }
 }
