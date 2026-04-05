@@ -35,5 +35,6 @@
     },
     "extraGears": [],
     "extraJoints": []
-  }
+  },
+  "shared-module": "0.1"
 }
