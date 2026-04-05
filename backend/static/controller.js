@@ -937,7 +937,9 @@ export function bootstrap() {
   }
 
   function isDeletableTreeNode(nodeId) {
-    return /^gear-\d+$/.test(nodeId) || /^joint-\d+$/.test(nodeId);
+    const isExtraGear = simulation.sceneGraph.extraGears.some((node) => node.id === nodeId);
+    const isExtraJoint = simulation.sceneGraph.extraJoints.some((node) => node.id === nodeId);
+    return isExtraGear || isExtraJoint;
   }
 
   function deleteTreeNodeById(nodeId) {
@@ -1705,8 +1707,13 @@ export function bootstrap() {
 
   function deleteSelectedNode() {
     if (!isDeletableTreeNode(simulation.selectedObjectId)) {
+      const selectedId = simulation.selectedObjectId;
+      const canonicalGearMessage = selectedId === "gear-1"
+        ? "Gear 1 is part of the default mechanism and cannot be deleted. Add extra gears if you want removable nodes."
+        : null;
       setStatusMessage("Select an extra gear or joint to delete.", {
-        debug: `deleteSelectedNode ignored; selectedObjectId=${simulation.selectedObjectId ?? "none"}.`,
+        ...(canonicalGearMessage ? { userMessage: canonicalGearMessage } : {}),
+        debug: `deleteSelectedNode ignored; selectedObjectId=${selectedId ?? "none"}.`,
         level: "warn",
       });
       return;
