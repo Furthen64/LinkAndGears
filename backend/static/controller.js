@@ -235,7 +235,7 @@ export function bootstrap() {
       { key: "teeth", label: "Teeth", input: "number", step: "1", min: "6", defaultValue: 18 },
       { key: "radiusMode", label: "Radius mode", input: "select", options: ["moduleTeeth", "manual"], defaultValue: "moduleTeeth" },
       { key: "radius", label: "Radius", input: "number", step: "0.01", min: "0.001", defaultValue: 0.9 },
-      { key: "meshWith", label: "Mesh with node id", input: "text", defaultValue: "gear-1" },
+      { key: "meshWith", label: "Mesh with node id", input: "text", defaultValue: "" },
       { key: "showIndicator", label: "Show indicator", input: "checkbox", defaultValue: false },
       { key: "inputRpm", label: "Motor speed (RPM)", input: "number", step: "0.1", defaultValue: 17.2 },
       { key: "inputAngularSpeed", label: "Manual angular speed (rad/s)", input: "number", step: "0.1", defaultValue: 1.8 },
@@ -262,7 +262,7 @@ export function bootstrap() {
         allowedTypes: ["motor", "joint-anchor"],
       },
       canonicalGears: {
-        "motor-1": { showIndicator: false, module: 0.1, teeth: 18, radiusMode: "moduleTeeth", radius: 0.9, inputRpm: 17.2, inputAngularSpeed: 1.8, meshWith: "gear-1" },
+        "motor-1": { showIndicator: false, module: 0.1, teeth: 18, radiusMode: "moduleTeeth", radius: 0.9, inputRpm: 17.2, inputAngularSpeed: 1.8, meshWith: null },
         "gear-1": { showIndicator: true, module: 0.1, teeth: 32, radiusMode: "moduleTeeth", radius: 1.6, meshWith: "motor-1" },
       },
       extraGears: [],
@@ -295,7 +295,7 @@ export function bootstrap() {
         allowedTypes: ["motor", "joint-anchor"],
       },
       canonicalGears: {
-        "motor-1": { showIndicator: false, module: 0.1, teeth: 18, radiusMode: "moduleTeeth", radius: 0.9, inputRpm: 17.2, inputAngularSpeed: 1.8, meshWith: "gear-1" },
+        "motor-1": { showIndicator: false, module: 0.1, teeth: 18, radiusMode: "moduleTeeth", radius: 0.9, inputRpm: 17.2, inputAngularSpeed: 1.8, meshWith: null },
         "gear-1": { showIndicator: true, module: 0.1, teeth: 32, radiusMode: "moduleTeeth", radius: 1.6, meshWith: "motor-1" },
       },
       extraGears: [],
@@ -381,7 +381,7 @@ export function bootstrap() {
         module: Number(motorConfig.module),
         teeth: Number(motorConfig.teeth),
         radiusMode: motorConfig.radiusMode ?? "moduleTeeth",
-        meshWith: motorConfig.meshWith ?? "gear-1",
+        meshWith: motorConfig.meshWith === undefined ? null : motorConfig.meshWith,
         inputRpm: Number(motorConfig.inputRpm),
         inputAngularSpeed: Number(motorConfig.inputAngularSpeed),
       },
@@ -408,7 +408,12 @@ export function bootstrap() {
         type: "motor",
         parentId: null,
         attachmentTargetId: null,
-        meshWith: gears["motor-1"].meshWith ?? simulation.sceneGraph.canonicalGears?.["motor-1"]?.meshWith ?? "gear-1",
+        meshWith:
+          gears["motor-1"].meshWith === undefined
+            ? (simulation.sceneGraph.canonicalGears?.["motor-1"]?.meshWith === undefined
+              ? null
+              : simulation.sceneGraph.canonicalGears?.["motor-1"]?.meshWith)
+            : gears["motor-1"].meshWith,
         ...gears["motor-1"],
       },
       "gear-1": {
@@ -1562,7 +1567,7 @@ export function bootstrap() {
       allowedTypes: ["motor", "joint-anchor"],
     };
     simulation.sceneGraph.canonicalGears = {
-      "motor-1": { showIndicator: false, module: 0.1, teeth: 18, radiusMode: "moduleTeeth", radius: 0.9, inputRpm: 17.2, inputAngularSpeed: 1.8, meshWith: "gear-1" },
+      "motor-1": { showIndicator: false, module: 0.1, teeth: 18, radiusMode: "moduleTeeth", radius: 0.9, inputRpm: 17.2, inputAngularSpeed: 1.8, meshWith: null },
       "gear-1": { showIndicator: true, module: 0.1, teeth: 32, radiusMode: "moduleTeeth", radius: 1.6, meshWith: "motor-1" },
     };
     simulation.sceneGraph.extraGears = [];
