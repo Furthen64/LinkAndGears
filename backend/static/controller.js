@@ -268,6 +268,7 @@ export function bootstrap() {
       },
       extraGears: [],
       extraJoints: [],
+      deletedCanonicalNodeIds: [],
       parentChildEdges: [],
     },
   };
@@ -301,6 +302,7 @@ export function bootstrap() {
       },
       extraGears: [],
       extraJoints: [],
+      deletedCanonicalNodeIds: [],
       parentChildEdges: [],
       nodeRegistry: {},
     },
@@ -357,6 +359,12 @@ export function bootstrap() {
     return allowed.map((entry) => normalizeNodeType(entry)).includes(normalizedType);
   }
 
+  function getDeletedCanonicalNodeIds() {
+    return Array.isArray(simulation.sceneGraph.deletedCanonicalNodeIds)
+      ? simulation.sceneGraph.deletedCanonicalNodeIds
+      : [];
+  }
+
   function canonicalGearNodes() {
     const motorConfig = simulation.sceneGraph.canonicalGears?.["motor-1"] ?? {};
     const drivenConfig = simulation.sceneGraph.canonicalGears?.["gear-1"] ?? {};
@@ -402,7 +410,7 @@ export function bootstrap() {
 
   function canonicalSceneNodes() {
     const gears = canonicalGearNodes();
-    return {
+    const canonicalNodes = {
       "motor-1": {
         id: "motor-1",
         label: "Motor1",
@@ -448,6 +456,37 @@ export function bootstrap() {
         attachmentTargetId: "linkage-1",
       },
     };
+    const deletedCanonical = new Set(getDeletedCanonicalNodeIds());
+    if (deletedCanonical.size === 0) {
+      return canonicalNodes;
+    }
+
+    const childMap = new Map();
+    Object.values(canonicalNodes).forEach((node) => {
+      if (!node?.parentId) {
+        return;
+      }
+      if (!childMap.has(node.parentId)) {
+        childMap.set(node.parentId, []);
+      }
+      childMap.get(node.parentId).push(node.id);
+    });
+
+    const cascadeDeleted = new Set(deletedCanonical);
+    const queue = [...deletedCanonical];
+    while (queue.length > 0) {
+      const currentId = queue.shift();
+      (childMap.get(currentId) ?? []).forEach((childId) => {
+        if (!cascadeDeleted.has(childId)) {
+          cascadeDeleted.add(childId);
+          queue.push(childId);
+        }
+      });
+    }
+
+    return Object.fromEntries(
+      Object.entries(canonicalNodes).filter(([nodeId]) => !cascadeDeleted.has(nodeId)),
+    );
   }
 
   function getRootNodeId() {
@@ -691,7 +730,7 @@ export function bootstrap() {
       ? rawNode.parentId
       : typeof rawNode?.attachmentTargetId === "string"
         ? rawNode.attachmentTargetId
-        : "linkage-1";
+        : getRootNodeId();
     return {
       id: rawNode?.id ?? `joint-${fallbackIndex}`,
       label: rawNode?.label ?? `Joint${fallbackIndex}`,
@@ -807,6 +846,9 @@ export function bootstrap() {
     };
     simulation.sceneGraph.extraGears = inputExtraGears.map((node, index) => sanitizeExtraGearNode(node, index + 2));
     simulation.sceneGraph.extraJoints = inputExtraJoints.map((node, index) => sanitizeExtraJointNode(node, index + 1));
+    simulation.sceneGraph.deletedCanonicalNodeIds = Array.isArray(graph.deletedCanonicalNodeIds)
+      ? graph.deletedCanonicalNodeIds.filter((id) => typeof id === "string")
+      : [];
     simulation.sceneGraph.rootNodeId = typeof graph.rootNodeId === "string" ? graph.rootNodeId : "motor-1";
     simulation.sceneGraph.genesisNodeId = typeof graph.genesisNodeId === "string"
       ? graph.genesisNodeId
@@ -864,6 +906,9 @@ export function bootstrap() {
       simulation.sceneGraph.extraJoints = Object.values(resolvedRegistry)
         .filter((node) => node.type !== "gear" && node.type !== "motor" && !["linkage-1", "slider-1", "ground-1"].includes(node.id))
         .map((node, index) => sanitizeExtraJointNode(node, index + 1));
+
+      simulation.sceneGraph.deletedCanonicalNodeIds = ["gear-1", "linkage-1", "slider-1", "ground-1"]
+        .filter((nodeId) => !resolvedRegistry[nodeId]);
     }
     if (!simulation.sceneGraph.nodeRegistry?.[simulation.sceneGraph.rootNodeId]) {
       simulation.sceneGraph.rootNodeId = "motor-1";
@@ -937,6 +982,9 @@ export function bootstrap() {
   }
 
   function isDeletableTreeNode(nodeId) {
+    if (["gear-1", "linkage-1", "slider-1", "ground-1"].includes(nodeId)) {
+      return true;
+    }
     const isExtraGear = simulation.sceneGraph.extraGears.some((node) => node.id === nodeId);
     const isExtraJoint = simulation.sceneGraph.extraJoints.some((node) => node.id === nodeId);
     return isExtraGear || isExtraJoint;
@@ -979,6 +1027,12 @@ export function bootstrap() {
     }
 
     const deletedSet = new Set(subtreeIds);
+    const canonicalDeletedIds = ["gear-1", "linkage-1", "slider-1", "ground-1"].filter((id) => deletedSet.has(id));
+    if (canonicalDeletedIds.length > 0) {
+      const priorDeletedCanonical = new Set(getDeletedCanonicalNodeIds());
+      canonicalDeletedIds.forEach((id) => priorDeletedCanonical.add(id));
+      simulation.sceneGraph.deletedCanonicalNodeIds = Array.from(priorDeletedCanonical);
+    }
     simulation.sceneGraph.extraGears = simulation.sceneGraph.extraGears.filter((node) => !deletedSet.has(node.id));
     simulation.sceneGraph.extraJoints = simulation.sceneGraph.extraJoints.filter((node) => !deletedSet.has(node.id));
 
@@ -1172,6 +1226,7 @@ export function bootstrap() {
           canonicalGears: simulation.sceneGraph.canonicalGears,
           extraGears: simulation.sceneGraph.extraGears,
           extraJoints: simulation.sceneGraph.extraJoints,
+          deletedCanonicalNodeIds: simulation.sceneGraph.deletedCanonicalNodeIds,
           parentChildEdges: simulation.sceneGraph.parentChildEdges,
         },
       };
@@ -1576,6 +1631,7 @@ export function bootstrap() {
     };
     simulation.sceneGraph.extraGears = [];
     simulation.sceneGraph.extraJoints = [];
+    simulation.sceneGraph.deletedCanonicalNodeIds = [];
     simulation.sceneGraph.parentChildEdges = [];
     rebuildNodeRegistry();
     simulation.selectedObjectId = getPrimaryDrivenGearId();
@@ -1684,7 +1740,7 @@ export function bootstrap() {
     const id = `joint-${index}`;
     const attachmentTargetId = simulation.sceneGraph.nodeRegistry?.[simulation.selectedObjectId]
       ? simulation.selectedObjectId
-      : "linkage-1";
+      : (simulation.sceneGraph.nodeRegistry?.["linkage-1"] ? "linkage-1" : getRootNodeId());
     if (!simulation.sceneGraph.nodeRegistry?.[attachmentTargetId]) {
       setStatusMessage("Unable to add joint: no valid attachment target found.", {
         debug: `add_joint aborted; target=${attachmentTargetId}.`,
@@ -1708,11 +1764,7 @@ export function bootstrap() {
   function deleteSelectedNode() {
     if (!isDeletableTreeNode(simulation.selectedObjectId)) {
       const selectedId = simulation.selectedObjectId;
-      const canonicalGearMessage = selectedId === "gear-1"
-        ? "Gear 1 is part of the default mechanism and cannot be deleted. Add extra gears if you want removable nodes."
-        : null;
-      setStatusMessage("Select an extra gear or joint to delete.", {
-        ...(canonicalGearMessage ? { userMessage: canonicalGearMessage } : {}),
+      setStatusMessage("Select a deletable node in the scene tree.", {
         debug: `deleteSelectedNode ignored; selectedObjectId=${selectedId ?? "none"}.`,
         level: "warn",
       });
