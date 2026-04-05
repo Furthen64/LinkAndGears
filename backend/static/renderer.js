@@ -145,7 +145,7 @@ function normalizeGearNode(rawNode, fallback, index = 0) {
       : Number.isFinite(rawNode?.omega)
         ? rawNode.omega
         : fallback.angularSpeed,
-    module: Number.isFinite(rawNode?.module) ? rawNode.module : fallback.module,
+    module: fallback.module,
     parentId: rawNode?.parentId ?? rawNode?.parent ?? null,
     meshPartnerId: rawNode?.meshPartnerId ?? rawNode?.meshWith ?? null,
     renderStyle: rawNode?.renderStyle ?? rawNode?.style ?? null,

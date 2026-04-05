@@ -185,6 +185,7 @@ function getControls() {
     slider_offset: document.getElementById("slider-offset"),
     slider_axis: document.getElementById("slider-axis"),
     theme_mode: document.getElementById("theme-mode"),
+    shared_module: document.getElementById("shared-module"),
     derived_driver_radius: document.getElementById("derived-driver-radius"),
     derived_gear_radius: document.getElementById("derived-gear-radius"),
     derived_angular_speed: document.getElementById("derived-angular-speed"),
@@ -224,7 +225,6 @@ export function bootstrap() {
   const controls = getControls();
   const NODE_PARAM_SCHEMA = {
     gear: [
-      { key: "module", label: "Module m", input: "number", step: "0.01", min: "0.001", defaultValue: 0.1 },
       { key: "teeth", label: "Teeth", input: "number", step: "1", min: "6", defaultValue: 32 },
       { key: "radiusMode", label: "Radius mode", input: "select", options: ["moduleTeeth", "manual"], defaultValue: "moduleTeeth" },
       { key: "radius", label: "Radius", input: "number", step: "0.01", min: "0.001", defaultValue: 1.6 },
@@ -232,7 +232,6 @@ export function bootstrap() {
       { key: "showIndicator", label: "Show indicator", input: "checkbox", defaultValue: true },
     ],
     motor: [
-      { key: "module", label: "Module m", input: "number", step: "0.01", min: "0.001", defaultValue: 0.1 },
       { key: "teeth", label: "Teeth", input: "number", step: "1", min: "6", defaultValue: 18 },
       { key: "radiusMode", label: "Radius mode", input: "select", options: ["moduleTeeth", "manual"], defaultValue: "moduleTeeth" },
       { key: "radius", label: "Radius", input: "number", step: "0.01", min: "0.001", defaultValue: 0.9 },
@@ -251,20 +250,22 @@ export function bootstrap() {
   const loadedWorkspacePresets = {};
   const NEW_SCENE_BASELINE_PATH = "/static/workspaces/new-scene.json";
   const NEW_SCENE_FALLBACK = {
+    "shared-module": "0.1",
     "crank-radius": "1.2",
     "rod-length": "3.2",
     "slider-offset": "0",
     "slider-axis": "horizontal",
     "theme-mode": "dark",
     sceneGraph: {
+      module: 0.1,
       rootNodeId: "motor-1",
       genesisNodeId: "motor-1",
       genesisPolicy: {
         allowedTypes: ["motor", "joint-anchor"],
       },
       canonicalGears: {
-        "motor-1": { showIndicator: false, module: 0.1, teeth: 18, radiusMode: "moduleTeeth", radius: 0.9, inputRpm: 17.2, inputAngularSpeed: 1.8, meshWith: null },
-        "gear-1": { showIndicator: true, module: 0.1, teeth: 32, radiusMode: "moduleTeeth", radius: 1.6, meshWith: "motor-1" },
+        "motor-1": { showIndicator: false, teeth: 18, radiusMode: "moduleTeeth", radius: 0.9, inputRpm: 17.2, inputAngularSpeed: 1.8, meshWith: null },
+        "gear-1": { showIndicator: true, teeth: 32, radiusMode: "moduleTeeth", radius: 1.6, meshWith: "motor-1" },
       },
       extraGears: [],
       extraJoints: [],
@@ -273,6 +274,7 @@ export function bootstrap() {
     },
   };
   const SCENE_EXPORT_CONTROL_IDS = [
+    "shared-module",
     "crank-radius",
     "rod-length",
     "slider-offset",
@@ -291,14 +293,15 @@ export function bootstrap() {
     selectedObjectId: "gear-1",
     hitRegions: [],
     sceneGraph: {
+      module: 0.1,
       rootNodeId: "motor-1",
       genesisNodeId: "motor-1",
       genesisPolicy: {
         allowedTypes: ["motor", "joint-anchor"],
       },
       canonicalGears: {
-        "motor-1": { showIndicator: false, module: 0.1, teeth: 18, radiusMode: "moduleTeeth", radius: 0.9, inputRpm: 17.2, inputAngularSpeed: 1.8, meshWith: null },
-        "gear-1": { showIndicator: true, module: 0.1, teeth: 32, radiusMode: "moduleTeeth", radius: 1.6, meshWith: "motor-1" },
+        "motor-1": { showIndicator: false, teeth: 18, radiusMode: "moduleTeeth", radius: 0.9, inputRpm: 17.2, inputAngularSpeed: 1.8, meshWith: null },
+        "gear-1": { showIndicator: true, teeth: 32, radiusMode: "moduleTeeth", radius: 1.6, meshWith: "motor-1" },
       },
       extraGears: [],
       extraJoints: [],
@@ -366,14 +369,33 @@ export function bootstrap() {
       : [];
   }
 
+  function getSceneModule() {
+    const fromGraph = Number(simulation.sceneGraph?.module);
+    if (Number.isFinite(fromGraph) && fromGraph > 0) {
+      return fromGraph;
+    }
+    const fromControl = Number(controls.shared_module?.value);
+    if (Number.isFinite(fromControl) && fromControl > 0) {
+      return fromControl;
+    }
+    return 0.1;
+  }
+
+  function syncSharedModuleControl() {
+    if (!controls.shared_module) {
+      return;
+    }
+    controls.shared_module.value = String(getSceneModule());
+  }
+
   function canonicalGearNodes() {
     const motorConfig = simulation.sceneGraph.canonicalGears?.["motor-1"] ?? {};
     const drivenConfig = simulation.sceneGraph.canonicalGears?.["gear-1"] ?? {};
+    const sceneModule = getSceneModule();
     const resolveRadius = (config, fallback) => {
-      const moduleValue = Number(config.module);
       const teethValue = Number(config.teeth);
-      if (config.radiusMode !== "manual" && Number.isFinite(moduleValue) && moduleValue > 0 && Number.isFinite(teethValue) && teethValue > 0) {
-        return (moduleValue * teethValue) / 2;
+      if (config.radiusMode !== "manual" && Number.isFinite(sceneModule) && sceneModule > 0 && Number.isFinite(teethValue) && teethValue > 0) {
+        return (sceneModule * teethValue) / 2;
       }
       const radiusValue = Number(config.radius);
       return Number.isFinite(radiusValue) && radiusValue > 0 ? radiusValue : fallback;
@@ -388,7 +410,7 @@ export function bootstrap() {
         center: { x: -centerDistance, y: 0 },
         radius: motorRadius,
         showIndicator: motorConfig.showIndicator === true,
-        module: Number(motorConfig.module),
+        module: sceneModule,
         teeth: Number(motorConfig.teeth),
         radiusMode: motorConfig.radiusMode ?? "moduleTeeth",
         meshWith: motorConfig.meshWith === undefined ? null : motorConfig.meshWith,
@@ -401,7 +423,7 @@ export function bootstrap() {
         center: { x: 0, y: 0 },
         radius: drivenRadius,
         showIndicator: drivenConfig.showIndicator !== false,
-        module: Number(drivenConfig.module),
+        module: sceneModule,
         teeth: Number(drivenConfig.teeth),
         radiusMode: drivenConfig.radiusMode ?? "moduleTeeth",
         meshWith: drivenConfig.meshWith ?? "motor-1",
@@ -575,7 +597,7 @@ export function bootstrap() {
     }
 
     if (config.radiusMode !== "manual") {
-      const moduleValue = Number(config.module);
+      const moduleValue = getSceneModule();
       const teethValue = Number(config.teeth);
       if (Number.isFinite(moduleValue) && moduleValue > 0 && Number.isFinite(teethValue) && teethValue > 0) {
         return (moduleValue * teethValue) / 2;
@@ -766,7 +788,7 @@ export function bootstrap() {
   function sanitizeExtraGearNode(rawNode, fallbackIndex = 1) {
     const id = rawNode?.id ?? `gear-${fallbackIndex}`;
     const label = rawNode?.label ?? `Gear${fallbackIndex}`;
-    const moduleValue = toPositiveFinite(Number(rawNode?.module), toPositiveFinite(simulation.params.module, 0.1));
+    const moduleValue = getSceneModule();
     const teethValue = Math.max(1, Math.round(toPositiveFinite(Number(rawNode?.teeth ?? rawNode?.toothCount), 24)));
     const providedRadius = Number(rawNode?.radius);
     const derivedRadius = (moduleValue * teethValue) / 2;
@@ -839,7 +861,7 @@ export function bootstrap() {
             y: Number.isFinite(rawNode.center.y) ? rawNode.center.y : 0,
           }
         : (fallback.center ?? { x: 0, y: 0 }),
-      module: Number.isFinite(Number(rawNode?.module)) ? Number(rawNode.module) : fallback.module,
+      module: getSceneModule(),
       teeth: Number.isFinite(Number(rawNode?.teeth ?? rawNode?.toothCount))
         ? Number(rawNode.teeth ?? rawNode.toothCount)
         : fallback.teeth,
@@ -878,17 +900,44 @@ export function bootstrap() {
     debugLabel.dataset.level = "info";
   }
 
+  function applySceneModuleToGears() {
+    const sceneModule = getSceneModule();
+    simulation.sceneGraph.module = sceneModule;
+
+    Object.values(simulation.sceneGraph.canonicalGears ?? {}).forEach((gear) => {
+      if (!gear || typeof gear !== "object") {
+        return;
+      }
+      gear.module = sceneModule;
+      syncGearRadius(gear);
+    });
+
+    simulation.sceneGraph.extraGears.forEach((gear) => {
+      if (!gear || typeof gear !== "object") {
+        return;
+      }
+      gear.module = sceneModule;
+      syncGearRadius(gear);
+    });
+  }
+
   function applySceneGraphConfig(sceneConfig) {
     const graph = sceneConfig?.sceneGraph ?? {};
     const inputExtraGears = Array.isArray(graph.extraGears) ? graph.extraGears : [];
     const inputExtraJoints = Array.isArray(graph.extraJoints) ? graph.extraJoints : [];
     const canonicalGears = graph.canonicalGears ?? {};
+    const sharedModule = toPositiveFinite(
+      Number(graph.module ?? sceneConfig?.["shared-module"]),
+      toPositiveFinite(
+        Number(canonicalGears?.["motor-1"]?.module ?? canonicalGears?.["gear-1"]?.module),
+        0.1,
+      ),
+    );
+    simulation.sceneGraph.module = sharedModule;
     simulation.sceneGraph.canonicalGears = {
       "motor-1": {
         showIndicator: canonicalGears?.["motor-1"]?.showIndicator === true,
-        module: Number.isFinite(Number(canonicalGears?.["motor-1"]?.module))
-          ? Number(canonicalGears?.["motor-1"]?.module)
-          : 0.1,
+        module: sharedModule,
         teeth: Number.isFinite(Number(canonicalGears?.["motor-1"]?.teeth))
           ? Number(canonicalGears?.["motor-1"]?.teeth)
           : 18,
@@ -906,9 +955,7 @@ export function bootstrap() {
       },
       "gear-1": {
         showIndicator: canonicalGears?.["gear-1"]?.showIndicator === false ? false : true,
-        module: Number.isFinite(Number(canonicalGears?.["gear-1"]?.module))
-          ? Number(canonicalGears?.["gear-1"]?.module)
-          : 0.1,
+        module: sharedModule,
         teeth: Number.isFinite(Number(canonicalGears?.["gear-1"]?.teeth))
           ? Number(canonicalGears?.["gear-1"]?.teeth)
           : 32,
@@ -956,7 +1003,7 @@ export function bootstrap() {
       if (rootFromRegistry) {
         simulation.sceneGraph.canonicalGears["motor-1"] = {
           showIndicator: rootFromRegistry.showIndicator === true,
-          module: Number.isFinite(rootFromRegistry.module) ? rootFromRegistry.module : 0.1,
+          module: sharedModule,
           teeth: Number.isFinite(rootFromRegistry.teeth) ? rootFromRegistry.teeth : 18,
           radiusMode: rootFromRegistry.radiusMode === "manual" ? "manual" : "moduleTeeth",
           radius: Number.isFinite(rootFromRegistry.radius) ? rootFromRegistry.radius : 0.9,
@@ -968,7 +1015,7 @@ export function bootstrap() {
       if (drivenFromRegistry) {
         simulation.sceneGraph.canonicalGears["gear-1"] = {
           showIndicator: drivenFromRegistry.showIndicator !== false,
-          module: Number.isFinite(drivenFromRegistry.module) ? drivenFromRegistry.module : 0.1,
+          module: sharedModule,
           teeth: Number.isFinite(drivenFromRegistry.teeth) ? drivenFromRegistry.teeth : 32,
           radiusMode: drivenFromRegistry.radiusMode === "manual" ? "manual" : "moduleTeeth",
           radius: Number.isFinite(drivenFromRegistry.radius) ? drivenFromRegistry.radius : 1.6,
@@ -995,6 +1042,8 @@ export function bootstrap() {
     if (simulation.sceneGraph.canonicalGears?.["motor-1"]) {
       simulation.sceneGraph.canonicalGears["motor-1"].meshWith = null;
     }
+    syncSharedModuleControl();
+    applySceneModuleToGears();
     const genesisType = simulation.sceneGraph.nodeRegistry?.[simulation.sceneGraph.genesisNodeId]?.type ?? "motor";
     if (!isAllowedGenesisType(genesisType, simulation.sceneGraph.genesisPolicy)) {
       simulation.sceneGraph.genesisNodeId = simulation.sceneGraph.rootNodeId;
@@ -1248,9 +1297,7 @@ export function bootstrap() {
     const motorAngularInput = Number(motorNode.inputAngularSpeed);
     const hasRpmInput = Number.isFinite(motorRpmInput);
     const angularSpeedFromRpm = hasRpmInput ? (2 * Math.PI * motorRpmInput) / 60 : Number.NaN;
-    const resolvedModule = Number.isFinite(Number(motorNode.module)) && Number(motorNode.module) > 0
-      ? Number(motorNode.module)
-      : Number(drivenNode.module);
+    const resolvedModule = getSceneModule();
     const parsed = {
       crank_radius: Number(controls.crank_radius?.value ?? 1.2),
       rod_length: Number(controls.rod_length?.value ?? 3.2),
@@ -1294,6 +1341,7 @@ export function bootstrap() {
       simulation.params = {
         ...normalization.params,
         scene_graph: {
+          module: simulation.sceneGraph.module,
           rootNodeId: simulation.sceneGraph.rootNodeId,
           genesisNodeId: simulation.sceneGraph.genesisNodeId,
           genesisPolicy: simulation.sceneGraph.genesisPolicy,
@@ -1348,7 +1396,7 @@ export function bootstrap() {
     }
 
     let nextValue = rawValue;
-    if (typeof rawValue === "string" && ["module", "teeth", "radius", "inputRpm", "inputAngularSpeed"].includes(key)) {
+    if (typeof rawValue === "string" && ["teeth", "radius", "inputRpm", "inputAngularSpeed"].includes(key)) {
       nextValue = Number(rawValue);
     }
     if (key === "showIndicator") {
@@ -1356,7 +1404,7 @@ export function bootstrap() {
     }
 
     persistentTarget[key] = nextValue;
-    if (["module", "teeth", "radius", "radiusMode", "meshWith"].includes(key)) {
+    if (["teeth", "radius", "radiusMode", "meshWith"].includes(key)) {
       if (persistentTarget.type === "motor" || persistentTarget.type === "gear" || canonicalTarget || extraGearTarget) {
         syncGearRadius(persistentTarget);
       }
@@ -1556,6 +1604,7 @@ export function bootstrap() {
     }
 
     [
+      "shared-module",
       "crank-radius",
       "rod-length",
       "slider-axis",
@@ -1681,6 +1730,18 @@ export function bootstrap() {
     controls.slider_axis,
   ].forEach(attachLiveUpdates);
 
+  const handleSharedModuleInput = () => {
+    simulation.sceneGraph.module = toPositiveFinite(Number(controls.shared_module?.value), getSceneModule());
+    applySceneModuleToGears();
+    realignMeshedGearCenters();
+    keepGearMeshesSane();
+    rebuildNodeRegistry();
+    syncParamsFromControls();
+    renderScene();
+  };
+  controls.shared_module?.addEventListener("input", handleSharedModuleInput);
+  controls.shared_module?.addEventListener("change", handleSharedModuleInput);
+
   controls.theme_mode?.addEventListener("input", () => {
     applyTheme(controls.theme_mode.value);
     renderScene();
@@ -1719,9 +1780,10 @@ export function bootstrap() {
     simulation.sceneGraph.genesisPolicy = {
       allowedTypes: ["motor", "joint-anchor"],
     };
+    simulation.sceneGraph.module = 0.1;
     simulation.sceneGraph.canonicalGears = {
-      "motor-1": { showIndicator: false, module: 0.1, teeth: 18, radiusMode: "moduleTeeth", radius: 0.9, inputRpm: 17.2, inputAngularSpeed: 1.8, meshWith: null },
-      "gear-1": { showIndicator: true, module: 0.1, teeth: 32, radiusMode: "moduleTeeth", radius: 1.6, meshWith: "motor-1" },
+      "motor-1": { showIndicator: false, teeth: 18, radiusMode: "moduleTeeth", radius: 0.9, inputRpm: 17.2, inputAngularSpeed: 1.8, meshWith: null },
+      "gear-1": { showIndicator: true, teeth: 32, radiusMode: "moduleTeeth", radius: 1.6, meshWith: "motor-1" },
     };
     simulation.sceneGraph.extraGears = [];
     simulation.sceneGraph.extraJoints = [];
@@ -1774,7 +1836,7 @@ export function bootstrap() {
     syncParamsFromControls();
     const index = getNextDynamicNodeIndex("gear", simulation.sceneGraph.extraGears);
     const id = `gear-${index}`;
-    const canonicalModule = toPositiveFinite(Number(simulation.sceneGraph.canonicalGears?.["gear-1"]?.module), toPositiveFinite(simulation.params.module, 0.1));
+    const canonicalModule = getSceneModule();
     const canonicalDrivenTeeth = Math.max(1, Math.round(toPositiveFinite(Number(simulation.sceneGraph.canonicalGears?.["gear-1"]?.teeth), 24)));
     const radius = (canonicalModule * canonicalDrivenTeeth) / 2;
     const selectedIsGear = typeof simulation.selectedObjectId === "string" && (simulation.selectedObjectId === getPrimaryDrivenGearId() || /^gear-\d+$/.test(simulation.selectedObjectId));
@@ -2044,6 +2106,7 @@ export function bootstrap() {
   canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
   applyTheme(controls.theme_mode?.value);
+  syncSharedModuleControl();
   applyInputConstraints(simulation.scene.inputConstraints);
   rebuildNodeRegistry();
   renderSceneTree();

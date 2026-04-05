@@ -90,5 +90,6 @@
         "childId": "ground-1"
       }
     ]
-  }
+  },
+  "shared-module": "0.2"
 }
