@@ -990,6 +990,7 @@ export function bootstrap() {
 
     keepGearMeshesSane();
     rebuildNodeRegistry();
+    syncParamsFromControls();
     simulation.selectedObjectId = nextSelectionId;
 
     simulation.sceneTreeDirty = true;
