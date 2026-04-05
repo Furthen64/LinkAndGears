@@ -38,9 +38,9 @@ export const DEFAULT_SCENE_TEMPLATE = {
   rotationArrow: {
     stroke: "#0ea5e9",
     fill: "#0ea5e9",
-    lineWidth: 2,
-    shaftLengthPx: 18,
-    headLengthPx: 5,
+    secondaryFill: "#f97316",
+    lineWidth: 1.5,
+    radiusPx: 4,
     directionWithPositiveSpeed: -1,
   },
   crankArm: {
