@@ -569,6 +569,30 @@ export function bootstrap() {
     return Number.isFinite(value) && value > 0 ? value : fallback;
   }
 
+  function deriveGearRadius(config, fallback = 0.1) {
+    if (!config || typeof config !== "object") {
+      return toPositiveFinite(fallback, 0.1);
+    }
+
+    if (config.radiusMode !== "manual") {
+      const moduleValue = Number(config.module);
+      const teethValue = Number(config.teeth);
+      if (Number.isFinite(moduleValue) && moduleValue > 0 && Number.isFinite(teethValue) && teethValue > 0) {
+        return (moduleValue * teethValue) / 2;
+      }
+    }
+
+    return toPositiveFinite(Number(config.radius), toPositiveFinite(fallback, 0.1));
+  }
+
+  function syncGearRadius(node) {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+
+    node.radius = deriveGearRadius(node, node.radius);
+  }
+
   function clearPendingGearSlot() {
     simulation.pendingGearSlot = null;
   }
@@ -637,7 +661,9 @@ export function bootstrap() {
     const dy = Number.isFinite(node.center?.y) ? node.center.y - anchor.center.y : fallbackDirection.y;
     const length = Math.hypot(dx, dy) || 1;
     const unit = { x: dx / length, y: dy / length };
-    const distance = Math.max(0.01, toPositiveFinite(anchor.radius, 0.1) + toPositiveFinite(node.radius, 0.1));
+    const anchorRadius = deriveGearRadius(anchor, anchor.radius);
+    const nodeRadius = deriveGearRadius(node, node.radius);
+    const distance = Math.max(0.01, anchorRadius + nodeRadius);
 
     return {
       x: anchor.center.x + unit.x * distance,
@@ -663,6 +689,7 @@ export function bootstrap() {
           return;
         }
 
+        syncGearRadius(node);
         const anchor = lookup[node.meshWith];
         if (!anchor) {
           return;
@@ -1330,6 +1357,9 @@ export function bootstrap() {
 
     persistentTarget[key] = nextValue;
     if (["module", "teeth", "radius", "radiusMode", "meshWith"].includes(key)) {
+      if (persistentTarget.type === "motor" || persistentTarget.type === "gear" || canonicalTarget || extraGearTarget) {
+        syncGearRadius(persistentTarget);
+      }
       realignMeshedGearCenters();
       keepGearMeshesSane();
     }
