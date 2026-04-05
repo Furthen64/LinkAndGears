@@ -454,6 +454,10 @@ function drawGrid(ctx, canvas, transform, options = {}) {
 }
 
 export function objectDetails(selection, params, state) {
+  const sceneRegistry = params?.scene_graph?.nodeRegistry ?? {};
+  const hasLinkage = Boolean(sceneRegistry["linkage-1"]);
+  const hasSlider = Boolean(sceneRegistry["slider-1"]);
+  const hasGround = Boolean(sceneRegistry["ground-1"]);
   const currentCrankArmLength = Math.hypot(state.crank.x, state.crank.y);
   const currentRodLength = Math.hypot(
     state.slider.x - state.crank.x,
@@ -517,7 +521,7 @@ export function objectDetails(selection, params, state) {
     };
   }
 
-  if (selection === "linkage" || selection === "linkage-1") {
+  if ((selection === "linkage" || selection === "linkage-1") && hasLinkage) {
     return {
       title: "Linkage",
       details: [
@@ -531,7 +535,7 @@ export function objectDetails(selection, params, state) {
     };
   }
 
-  if (selection === "ground" || selection === "ground-1") {
+  if ((selection === "ground" || selection === "ground-1") && hasGround) {
     return {
       title: "Ground",
       details: [
@@ -542,7 +546,7 @@ export function objectDetails(selection, params, state) {
     };
   }
 
-  if (selection === "slider" || selection === "slider-1") {
+  if ((selection === "slider" || selection === "slider-1") && hasSlider) {
     return {
       title: "Slider",
       details: [
@@ -560,6 +564,10 @@ export function objectDetails(selection, params, state) {
 }
 
 export function drawScene(ctx, canvas, params, state, scene, selectedObject, options = {}, camera = {}) {
+  const sceneRegistry = params?.scene_graph?.nodeRegistry ?? {};
+  const hasLinkage = Boolean(sceneRegistry["linkage-1"]);
+  const hasSlider = Boolean(sceneRegistry["slider-1"]);
+  const hasGround = Boolean(sceneRegistry["ground-1"]);
   const t = createTransform(canvas, params, camera);
   const gearNodes = computeGearNodes(params, state).sort((a, b) => a.zIndex - b.zIndex);
   const crank = t.toCanvas(state.crank);
@@ -570,20 +578,22 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawGrid(ctx, canvas, t, { grid: gridPalette });
 
-  ctx.strokeStyle = scene.rail.stroke;
-  ctx.lineWidth = scene.rail.lineWidth;
-  if (params.slider_axis === "horizontal") {
-    const railY = t.toCanvas({ x: 0, y: params.slider_offset }).y;
-    ctx.beginPath();
-    ctx.moveTo(scene.rail.margin, railY);
-    ctx.lineTo(canvas.width - scene.rail.margin, railY);
-    ctx.stroke();
-  } else {
-    const railX = t.toCanvas({ x: params.slider_offset, y: 0 }).x;
-    ctx.beginPath();
-    ctx.moveTo(railX, scene.rail.margin);
-    ctx.lineTo(railX, canvas.height - scene.rail.margin);
-    ctx.stroke();
+  if (hasGround) {
+    ctx.strokeStyle = scene.rail.stroke;
+    ctx.lineWidth = scene.rail.lineWidth;
+    if (params.slider_axis === "horizontal") {
+      const railY = t.toCanvas({ x: 0, y: params.slider_offset }).y;
+      ctx.beginPath();
+      ctx.moveTo(scene.rail.margin, railY);
+      ctx.lineTo(canvas.width - scene.rail.margin, railY);
+      ctx.stroke();
+    } else {
+      const railX = t.toCanvas({ x: params.slider_offset, y: 0 }).x;
+      ctx.beginPath();
+      ctx.moveTo(railX, scene.rail.margin);
+      ctx.lineTo(railX, canvas.height - scene.rail.margin);
+      ctx.stroke();
+    }
   }
 
   const renderedGears = gearNodes.map((node) => ({ node, ...drawGearNode(ctx, t, params, scene, node) }));
@@ -601,34 +611,40 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
     ?? renderedGears[0];
   const center = drivenGear?.centerCanvas ?? t.toCanvas({ x: 0, y: 0 });
 
-  ctx.strokeStyle = scene.crankArm.stroke;
-  ctx.lineWidth = scene.crankArm.lineWidth;
-  ctx.beginPath();
-  ctx.moveTo(center.x, center.y);
-  ctx.lineTo(crank.x, crank.y);
-  ctx.stroke();
-
-  ctx.strokeStyle = scene.connectingRod.stroke;
-  ctx.lineWidth = scene.connectingRod.lineWidth;
-  ctx.beginPath();
-  ctx.moveTo(crank.x, crank.y);
-  ctx.lineTo(slider.x, slider.y);
-  ctx.stroke();
-
-  ctx.fillStyle = scene.crankPin.fill;
-  ctx.beginPath();
-  ctx.arc(crank.x, crank.y, scene.crankPin.radiusPx, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = scene.sliderBlock.fill;
   const sliderDimensions =
     params.slider_axis === "horizontal" ? scene.sliderBlock.horizontal : scene.sliderBlock.vertical;
-  ctx.fillRect(
-    slider.x - sliderDimensions.widthPx / 2,
-    slider.y - sliderDimensions.heightPx / 2,
-    sliderDimensions.widthPx,
-    sliderDimensions.heightPx
-  );
+  if (hasLinkage) {
+    ctx.strokeStyle = scene.crankArm.stroke;
+    ctx.lineWidth = scene.crankArm.lineWidth;
+    ctx.beginPath();
+    ctx.moveTo(center.x, center.y);
+    ctx.lineTo(crank.x, crank.y);
+    ctx.stroke();
+
+    if (hasSlider) {
+      ctx.strokeStyle = scene.connectingRod.stroke;
+      ctx.lineWidth = scene.connectingRod.lineWidth;
+      ctx.beginPath();
+      ctx.moveTo(crank.x, crank.y);
+      ctx.lineTo(slider.x, slider.y);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = scene.crankPin.fill;
+    ctx.beginPath();
+    ctx.arc(crank.x, crank.y, scene.crankPin.radiusPx, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (hasSlider) {
+    ctx.fillStyle = scene.sliderBlock.fill;
+    ctx.fillRect(
+      slider.x - sliderDimensions.widthPx / 2,
+      slider.y - sliderDimensions.heightPx / 2,
+      sliderDimensions.widthPx,
+      sliderDimensions.heightPx
+    );
+  }
 
   const selectionStroke = isLightTheme ? "#111827" : "#f8fafc";
   const selectionWidth = 2;
@@ -686,15 +702,17 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
         centerWorld,
       });
     });
-  } else if (selectedObject === "linkage" || selectedObject === "linkage-1") {
+  } else if ((selectedObject === "linkage" || selectedObject === "linkage-1") && hasLinkage) {
     ctx.strokeStyle = selectionStroke;
     ctx.lineWidth = selectionWidth;
     ctx.beginPath();
     ctx.moveTo(center.x, center.y);
     ctx.lineTo(crank.x, crank.y);
-    ctx.lineTo(slider.x, slider.y);
+    if (hasSlider) {
+      ctx.lineTo(slider.x, slider.y);
+    }
     ctx.stroke();
-  } else if (selectedObject === "ground" || selectedObject === "ground-1") {
+  } else if ((selectedObject === "ground" || selectedObject === "ground-1") && hasGround) {
     ctx.strokeStyle = selectionStroke;
     ctx.lineWidth = selectionWidth;
     ctx.setLineDash([6, 4]);
@@ -712,7 +730,7 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
       ctx.stroke();
     }
     ctx.setLineDash([]);
-  } else if (selectedObject === "slider" || selectedObject === "slider-1") {
+  } else if ((selectedObject === "slider" || selectedObject === "slider-1") && hasSlider) {
     ctx.strokeStyle = selectionStroke;
     ctx.lineWidth = selectionWidth;
     ctx.strokeRect(
@@ -726,8 +744,8 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
   const railTolerance = 8;
   const linkageTolerance = 8;
 
-  return [
-    {
+  const hitRegions = [
+    ...(hasSlider ? [{
       id: "slider-1",
       contains(point) {
         return (
@@ -737,7 +755,7 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
           point.y <= slider.y + sliderDimensions.heightPx / 2
         );
       },
-    },
+    }] : []),
     ...renderedGears.map((entry) => ({
       id: entry.node.id,
       contains(point) {
@@ -754,16 +772,16 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
         return Math.hypot(point.x - slotCanvas.x, point.y - slotCanvas.y) <= slotRadiusPx + 2;
       },
     })),
-    {
+    ...(hasLinkage ? [{
       id: "linkage-1",
       contains(point) {
         const closeToCrankArm = distanceToSegment(point, center, crank) <= linkageTolerance;
-        const closeToRod = distanceToSegment(point, crank, slider) <= linkageTolerance;
+        const closeToRod = hasSlider ? distanceToSegment(point, crank, slider) <= linkageTolerance : false;
         const closeToPin = Math.hypot(point.x - crank.x, point.y - crank.y) <= scene.crankPin.radiusPx + 4;
         return closeToCrankArm || closeToRod || closeToPin;
       },
-    },
-    {
+    }] : []),
+    ...(hasGround ? [{
       id: "ground-1",
       contains(point) {
         if (params.slider_axis === "horizontal") {
@@ -782,8 +800,10 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
           point.y <= canvas.height - scene.rail.margin
         );
       },
-    },
+    }] : []),
   ];
+
+  return hitRegions;
 }
 
 if (typeof globalThis !== "undefined") {
