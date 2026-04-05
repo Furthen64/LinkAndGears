@@ -56,9 +56,11 @@ function clampToPositive(value, fallback = 1) {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-function getGearGeometry(radiusWorld, params, gearScene, t, toothCountOverride) {
+function getGearGeometry(radiusWorld, params, gearScene, t, toothCountOverride, moduleOverride = Number.NaN) {
   const pitchRadiusPx = t.toCanvasLength(radiusWorld);
-  const moduleWorld = Number.isFinite(params.module) && params.module > 0 ? params.module : Number.NaN;
+  const moduleWorld = Number.isFinite(moduleOverride) && moduleOverride > 0
+    ? moduleOverride
+    : (Number.isFinite(params.module) && params.module > 0 ? params.module : Number.NaN);
   const fallbackToothCount = Math.max(
     clampToPositive(gearScene.minToothCount, 8),
     Math.round(radiusWorld * clampToPositive(gearScene.teethPerRadiusUnit, 8))
@@ -257,7 +259,7 @@ function computeGearNodes(params, state) {
 
 function drawGearNode(ctx, transform, params, scene, node) {
   const style = node.renderStyle ?? (node.role === "driver" ? scene.driverGear : scene.gear);
-  const geometry = getGearGeometry(node.radius, params, style, transform, node.toothCount);
+  const geometry = getGearGeometry(node.radius, params, style, transform, node.toothCount, node.module);
   const centerCanvas = transform.toCanvas(node.center);
   const toothPhaseOffset = getGearToothPhaseOffset(node, geometry);
 

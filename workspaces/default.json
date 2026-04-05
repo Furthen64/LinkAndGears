@@ -1,14 +1,36 @@
 {
-  "shared-module": "0.1",
-  "driver-teeth-z1": "18",
-  "driven-teeth-z2": "32",
-  "gear-radius": "1.6",
-  "driver-radius": "0.9",
   "crank-radius": "1.2",
   "rod-length": "3.2",
-  "motor-rpm": "17.2",
-  "angular-speed": "1.8",
   "slider-offset": "0",
   "slider-axis": "horizontal",
-  "theme-mode": "dark"
+  "theme-mode": "dark",
+  "sceneGraph": {
+    "rootNodeId": "motor-1",
+    "genesisNodeId": "motor-1",
+    "genesisPolicy": {
+      "allowedTypes": ["motor", "joint-anchor"]
+    },
+    "canonicalGears": {
+      "motor-1": {
+        "showIndicator": false,
+        "module": 0.1,
+        "teeth": 18,
+        "radiusMode": "moduleTeeth",
+        "radius": 0.9,
+        "meshWith": "gear-1",
+        "inputRpm": 17.2,
+        "inputAngularSpeed": 1.8
+      },
+      "gear-1": {
+        "showIndicator": true,
+        "module": 0.1,
+        "teeth": 32,
+        "radiusMode": "moduleTeeth",
+        "radius": 1.6,
+        "meshWith": "motor-1"
+      }
+    },
+    "extraGears": [],
+    "extraJoints": []
+  }
 }

@@ -6,13 +6,23 @@ function toFiniteNumber(value, fallback = 0) {
   return Number.isFinite(value) ? value : fallback;
 }
 
-function getNodeRadius(node) {
-  if (Number.isFinite(node?.radius) && node.radius > 0) {
+function getNodeRadius(node, sceneDefaults = {}) {
+  if (node?.radiusMode === "manual" && Number.isFinite(node?.radius) && node.radius > 0) {
     return node.radius;
   }
 
-  if (Number.isFinite(node?.module) && node.module > 0 && Number.isFinite(node?.toothCount) && node.toothCount > 0) {
-    return (node.module * node.toothCount) / 2;
+  const moduleValue = Number.isFinite(node?.module) && node.module > 0
+    ? node.module
+    : (Number.isFinite(sceneDefaults?.module) ? sceneDefaults.module : Number.NaN);
+  const teethValue = Number.isFinite(node?.toothCount) && node.toothCount > 0
+    ? node.toothCount
+    : (Number.isFinite(sceneDefaults?.teeth) ? sceneDefaults.teeth : Number.NaN);
+  if (Number.isFinite(moduleValue) && moduleValue > 0 && Number.isFinite(teethValue) && teethValue > 0) {
+    return (moduleValue * teethValue) / 2;
+  }
+
+  if (Number.isFinite(node?.radius) && node.radius > 0) {
+    return node.radius;
   }
 
   return Number.NaN;
@@ -145,7 +155,7 @@ export function computeSceneState(sceneGraph, t) {
       };
     }
 
-    const radius = getNodeRadius(gear);
+    const radius = getNodeRadius(gear, sceneGraph?.gearDefaults ?? {});
     if (!Number.isFinite(radius) || radius <= 0) {
       return {
         valid: false,
@@ -330,32 +340,49 @@ export function computeState(params, t) {
   const rootRegistryNode = params.scene_graph?.nodeRegistry?.[rootGearId];
   const drivenRegistryNode = params.scene_graph?.nodeRegistry?.[drivenGearId];
 
+  const motorNodeConfig = canonicalGearConfig?.[rootGearId] ?? {};
+  const drivenNodeConfig = canonicalGearConfig?.[drivenGearId] ?? {};
+  const resolvedModule = Number.isFinite(Number(motorNodeConfig.module))
+    ? Number(motorNodeConfig.module)
+    : Number(params.module);
+  const resolvedMotorTeeth = Number.isFinite(Number(motorNodeConfig.teeth))
+    ? Number(motorNodeConfig.teeth)
+    : Number(params.driver_teeth);
+  const resolvedDrivenTeeth = Number.isFinite(Number(drivenNodeConfig.teeth))
+    ? Number(drivenNodeConfig.teeth)
+    : Number(params.driven_teeth);
+
   const sceneState = computeSceneState(
     {
+      gearDefaults: {
+        module: resolvedModule,
+      },
       gears: [
         {
           id: rootGearId,
-          radius: Number.isFinite(rootRegistryNode?.radius) ? rootRegistryNode.radius : driver_radius,
+          radiusMode: motorNodeConfig.radiusMode,
+          radius: Number.isFinite(rootRegistryNode?.radius) ? rootRegistryNode.radius : Number(motorNodeConfig.radius),
           angle: initial_angle,
           angularSpeed: angular_speed,
           center: rootRegistryNode?.center ?? { x: -canonicalCenterDistance, y: 0 },
-          module: params.module,
-          toothCount: params.driver_teeth,
+          module: Number(motorNodeConfig.module),
+          toothCount: resolvedMotorTeeth,
           role: "driver",
-          showIndicator: canonicalGearConfig?.[rootGearId]?.showIndicator === true,
+          showIndicator: motorNodeConfig?.showIndicator === true,
         },
         ...(drivenGearId !== rootGearId
           ? [{
               id: drivenGearId,
               meshWith: rootGearId,
-              radius: Number.isFinite(drivenRegistryNode?.radius) ? drivenRegistryNode.radius : params.gear_radius,
+              radiusMode: drivenNodeConfig.radiusMode,
+              radius: Number.isFinite(drivenRegistryNode?.radius) ? drivenRegistryNode.radius : Number(drivenNodeConfig.radius),
               angle: 0,
               phaseOffset: 0,
-              module: params.module,
-              toothCount: params.driven_teeth,
+              module: Number(drivenNodeConfig.module),
+              toothCount: resolvedDrivenTeeth,
               role: "driven",
               center: drivenRegistryNode?.center ?? { x: 0, y: 0 },
-              showIndicator: canonicalGearConfig?.[drivenGearId]?.showIndicator === false ? false : true,
+              showIndicator: drivenNodeConfig?.showIndicator === false ? false : true,
             }]
           : []),
         ...((params.scene_graph?.extraGears ?? []).map((node) => ({
@@ -364,6 +391,7 @@ export function computeState(params, t) {
           angularSpeed: node.angularSpeed,
           module: node.module,
           toothCount: node.teeth ?? node.toothCount,
+          radiusMode: node.radiusMode,
           radius: node.radius,
           center: node.center,
           meshWith: node.meshWith,
