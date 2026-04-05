@@ -1264,12 +1264,14 @@ export function bootstrap() {
     if (!nodeId) {
       return;
     }
-    const nodeRegistryTarget = simulation.sceneGraph.nodeRegistry?.[nodeId];
-    const canonical = simulation.sceneGraph.canonicalGears?.[nodeId];
-    const target = nodeRegistryTarget ?? canonical ?? simulation.sceneGraph.extraGears.find((node) => node.id === nodeId);
-    if (!target) {
+    const canonicalTarget = simulation.sceneGraph.canonicalGears?.[nodeId] ?? null;
+    const extraGearTarget = simulation.sceneGraph.extraGears.find((node) => node.id === nodeId) ?? null;
+    const extraJointTarget = simulation.sceneGraph.extraJoints.find((node) => node.id === nodeId) ?? null;
+    const persistentTarget = canonicalTarget ?? extraGearTarget ?? extraJointTarget;
+    if (!persistentTarget) {
       return;
     }
+
     let nextValue = rawValue;
     if (typeof rawValue === "string" && ["module", "teeth", "radius", "inputRpm", "inputAngularSpeed"].includes(key)) {
       nextValue = Number(rawValue);
@@ -1277,10 +1279,8 @@ export function bootstrap() {
     if (key === "showIndicator") {
       nextValue = rawValue === true;
     }
-    target[key] = nextValue;
-    if (nodeRegistryTarget && key === "teeth") {
-      nodeRegistryTarget.toothCount = nextValue;
-    }
+
+    persistentTarget[key] = nextValue;
     rebuildNodeRegistry();
     syncParamsFromControls();
     renderScene();
