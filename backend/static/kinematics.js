@@ -225,6 +225,18 @@ export function computeSceneState(sceneGraph, t) {
   }
 
   const unresolved = new Set(Object.keys(gearsById));
+  const rootNodeId = (() => {
+    if (typeof sceneGraph?.rootNodeId === "string" && gearsById[sceneGraph.rootNodeId]) {
+      return sceneGraph.rootNodeId;
+    }
+
+    const explicitMotor = Object.values(gearsById).find((node) => node?.type === "motor" || node?.role === "motor");
+    if (explicitMotor?.id) {
+      return explicitMotor.id;
+    }
+
+    return gearsById["motor-1"] ? "motor-1" : null;
+  })();
   let progressed = true;
 
   while (unresolved.size > 0 && progressed) {
@@ -232,7 +244,20 @@ export function computeSceneState(sceneGraph, t) {
 
     for (const id of Array.from(unresolved)) {
       const node = gearsById[id];
-      const parentId = node.meshWith ?? node.parentId;
+      const topologyParentId = node.parentId ?? node.attachmentTargetId;
+      const isMotorNode = node.type === "motor" || node.role === "motor" || node.role === "driver";
+      const isRootNode = node.id === rootNodeId;
+      const parentId = isMotorNode || isRootNode ? null : topologyParentId;
+
+      if ((isMotorNode || isRootNode) && node.meshWith) {
+        return {
+          valid: false,
+          invalidCategory: "constraint",
+          invalidReason: `Gear ${id} root node cannot depend on meshWith target: ${node.meshWith}`,
+          gearsById,
+          jointsById,
+        };
+      }
 
       if (!parentId) {
         const ownSpeed = toFiniteNumber(node.inputAngularSpeed, 0) * node.sign;
@@ -248,7 +273,7 @@ export function computeSceneState(sceneGraph, t) {
         return {
           valid: false,
           invalidCategory: "constraint",
-          invalidReason: `Gear ${id} references missing parent/mesh node: ${parentId}`,
+          invalidReason: `Gear ${id} references missing hierarchy parent node: ${parentId}`,
           gearsById,
           jointsById,
         };
