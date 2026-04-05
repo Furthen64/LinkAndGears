@@ -267,6 +267,7 @@ export function bootstrap() {
       },
       extraGears: [],
       extraJoints: [],
+      parentChildEdges: [],
     },
   };
   const SCENE_EXPORT_CONTROL_IDS = [
@@ -299,6 +300,7 @@ export function bootstrap() {
       },
       extraGears: [],
       extraJoints: [],
+      parentChildEdges: [],
       nodeRegistry: {},
     },
     camera: {
@@ -467,7 +469,7 @@ export function bootstrap() {
       registry[node.id] = {
         ...node,
         type: "gear",
-        attachmentTargetId: node.meshWith ?? node.parentId ?? simulation.sceneGraph.rootNodeId,
+        attachmentTargetId: node.parentId ?? node.meshWith ?? simulation.sceneGraph.rootNodeId,
       };
     });
 
@@ -475,11 +477,33 @@ export function bootstrap() {
       registry[node.id] = {
         ...node,
         type: normalizeNodeType(node.type ?? "joint-anchor"),
-        attachmentTargetId: node.attachmentTargetId ?? node.parentId ?? "linkage-1",
+        attachmentTargetId: node.parentId ?? node.attachmentTargetId ?? "linkage-1",
       };
     });
 
     simulation.sceneGraph.nodeRegistry = registry;
+    simulation.sceneGraph.parentChildEdges = Object.values(registry)
+      .filter((node) => typeof node?.parentId === "string" && typeof node?.id === "string" && node.id !== node.parentId)
+      .map((node) => ({ parentId: node.parentId, childId: node.id }));
+  }
+
+  function buildEdgeMaps() {
+    const edges = Array.isArray(simulation.sceneGraph.parentChildEdges) ? simulation.sceneGraph.parentChildEdges : [];
+    const parentByChild = new Map();
+    const childrenByParent = new Map();
+
+    edges.forEach((edge) => {
+      if (!edge || typeof edge.parentId !== "string" || typeof edge.childId !== "string" || edge.parentId === edge.childId) {
+        return;
+      }
+      parentByChild.set(edge.childId, edge.parentId);
+      if (!childrenByParent.has(edge.parentId)) {
+        childrenByParent.set(edge.parentId, []);
+      }
+      childrenByParent.get(edge.parentId).push(edge.childId);
+    });
+
+    return { parentByChild, childrenByParent };
   }
 
   function isGearNodeId(nodeId) {
@@ -609,7 +633,7 @@ export function bootstrap() {
       }
 
       node.meshWith = fallbackAnchor.id;
-      node.parentId = null;
+      node.parentId = fallbackAnchor.id;
       node.center = resolveMeshCenter(fallbackAnchor, node);
       node.centerMode = "manual";
       lookup[node.id] = node;
@@ -631,7 +655,11 @@ export function bootstrap() {
     return {
       id,
       label,
-      parentId: typeof rawNode?.parentId === "string" ? rawNode.parentId : null,
+      parentId: typeof rawNode?.parentId === "string"
+        ? rawNode.parentId
+        : typeof rawNode?.meshWith === "string"
+          ? rawNode.meshWith
+          : null,
       meshWith: typeof rawNode?.meshWith === "string" ? rawNode.meshWith : null,
       module: moduleValue,
       teeth: teethValue,
@@ -653,16 +681,19 @@ export function bootstrap() {
   }
 
   function sanitizeExtraJointNode(rawNode, fallbackIndex = 1) {
+    const resolvedParentId = typeof rawNode?.parentId === "string"
+      ? rawNode.parentId
+      : typeof rawNode?.attachmentTargetId === "string"
+        ? rawNode.attachmentTargetId
+        : "linkage-1";
     return {
       id: rawNode?.id ?? `joint-${fallbackIndex}`,
       label: rawNode?.label ?? `Joint${fallbackIndex}`,
       type: normalizeNodeType(rawNode?.type ?? "joint-anchor"),
-      parentId: typeof rawNode?.parentId === "string" ? rawNode.parentId : "linkage-1",
+      parentId: resolvedParentId,
       attachmentTargetId: typeof rawNode?.attachmentTargetId === "string"
         ? rawNode.attachmentTargetId
-        : typeof rawNode?.parentId === "string"
-          ? rawNode.parentId
-          : "linkage-1",
+        : resolvedParentId,
       linkageAnchor: rawNode?.linkageAnchor && typeof rawNode.linkageAnchor === "object"
         ? {
             x: Number.isFinite(rawNode.linkageAnchor.x) ? rawNode.linkageAnchor.x : 0,
@@ -772,21 +803,7 @@ export function bootstrap() {
     const nodesById = new Map(
       Object.values(registry).map((node) => [node.id, makeNode(node.id, node.label ?? node.id)]),
     );
-    const attachments = new Map();
-
-    Object.values(registry).forEach((node) => {
-      if (node.id === rootId) {
-        return;
-      }
-      const attachmentId = node.attachmentTargetId ?? node.meshWith ?? node.parentId;
-      if (!attachmentId || !nodesById.has(attachmentId)) {
-        return;
-      }
-      if (!attachments.has(attachmentId)) {
-        attachments.set(attachmentId, []);
-      }
-      attachments.get(attachmentId).push(node.id);
-    });
+    const { childrenByParent } = buildEdgeMaps();
 
     const visited = new Set();
     function attachChildren(nodeId) {
@@ -798,7 +815,7 @@ export function bootstrap() {
       if (!treeNode) {
         return;
       }
-      const children = attachments.get(nodeId) ?? [];
+      const children = childrenByParent.get(nodeId) ?? [];
       children.forEach((childId) => {
         const childNode = nodesById.get(childId);
         if (!childNode) {
@@ -834,63 +851,62 @@ export function bootstrap() {
   }
 
   function deleteTreeNodeById(nodeId) {
-    let removed = false;
-    let deletedGear = null;
-
-    const gearIndex = simulation.sceneGraph.extraGears.findIndex((node) => node.id === nodeId);
-    if (gearIndex >= 0) {
-      deletedGear = simulation.sceneGraph.extraGears[gearIndex];
-      simulation.sceneGraph.extraGears.splice(gearIndex, 1);
-      removed = true;
-    }
-
-    const jointIndex = simulation.sceneGraph.extraJoints.findIndex((node) => node.id === nodeId);
-    if (jointIndex >= 0) {
-      simulation.sceneGraph.extraJoints.splice(jointIndex, 1);
-      removed = true;
-    }
-
-    if (!removed) {
+    const targetNode = simulation.sceneGraph.nodeRegistry?.[nodeId];
+    if (!targetNode) {
       return;
     }
 
-    let repairedCount = 0;
-    let fallbackAnchorId = null;
-    if (deletedGear) {
-      fallbackAnchorId = deletedGear.meshWith ?? deletedGear.parentId ?? getPrimaryDrivenGearId();
-      const dependents = simulation.sceneGraph.extraGears.filter(
-        (node) => node.meshWith === deletedGear.id || node.parentId === deletedGear.id,
-      );
-      const lookup = getGearLookup();
-      const fallbackAnchor = lookup[fallbackAnchorId] ?? lookup[getPrimaryDrivenGearId()] ?? lookup[getRootNodeId()];
-
-      dependents.forEach((node, index) => {
-        if (!fallbackAnchor) {
-          return;
-        }
-        node.meshWith = fallbackAnchor.id;
-        node.parentId = null;
-        node.center = resolveMeshCenter(fallbackAnchor, node, { x: 1, y: index % 2 === 0 ? 1 : -1 });
-        node.centerMode = "manual";
+    if (nodeId === simulation.sceneGraph.genesisNodeId) {
+      setStatusMessage("Cannot delete genesis node unless a replacement is created in the same action.", {
+        debug: `deleteTreeNodeById blocked for genesis node ${nodeId}.`,
+        level: "warn",
       });
-
-      repairedCount += dependents.length;
+      return;
     }
 
-    repairedCount += keepGearMeshesSane(deletedGear?.id ?? null, fallbackAnchorId);
+    const { parentByChild, childrenByParent } = buildEdgeMaps();
+    const subtreeIds = [];
+    const visited = new Set();
+    const stack = [nodeId];
+    while (stack.length > 0) {
+      const currentId = stack.pop();
+      if (!currentId || visited.has(currentId)) {
+        continue;
+      }
+      visited.add(currentId);
+      subtreeIds.push(currentId);
+      const children = childrenByParent.get(currentId) ?? [];
+      children.forEach((childId) => stack.push(childId));
+    }
+
+    if (subtreeIds.length > 1 && typeof window?.confirm === "function") {
+      const confirmed = window.confirm(`Delete ${targetNode.label ?? nodeId} and ${subtreeIds.length - 1} descendant node(s)?`);
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    const deletedSet = new Set(subtreeIds);
+    simulation.sceneGraph.extraGears = simulation.sceneGraph.extraGears.filter((node) => !deletedSet.has(node.id));
+    simulation.sceneGraph.extraJoints = simulation.sceneGraph.extraJoints.filter((node) => !deletedSet.has(node.id));
+
+    let nextSelectionId = nodeId;
+    while (nextSelectionId && deletedSet.has(nextSelectionId)) {
+      nextSelectionId = parentByChild.get(nextSelectionId) ?? null;
+    }
+    if (!nextSelectionId || !simulation.sceneGraph.nodeRegistry?.[nextSelectionId]) {
+      nextSelectionId = getRootNodeId();
+    }
+
+    keepGearMeshesSane();
     rebuildNodeRegistry();
-
-    if (simulation.selectedObjectId === nodeId) {
-      simulation.selectedObjectId = getPrimaryDrivenGearId();
-    }
+    simulation.selectedObjectId = nextSelectionId;
 
     simulation.sceneTreeDirty = true;
-
-    const removalMessage = repairedCount > 0
-      ? `Removed ${nodeId}. Re-meshed ${repairedCount} gear${repairedCount === 1 ? "" : "s"}.`
-      : `Removed ${nodeId} from scene tree.`;
-    setStatusMessage(removalMessage, {
-      debug: `deleteTreeNodeById(nodeId=${nodeId}, repairedCount=${repairedCount}, fallbackAnchor=${fallbackAnchorId ?? "none"})`,
+    setStatusMessage(
+      `Deleted ${subtreeIds.length} node${subtreeIds.length === 1 ? "" : "s"} from scene tree.`,
+      {
+      debug: `deleteTreeNodeById(nodeId=${nodeId}, deletedCount=${subtreeIds.length}, nextSelection=${nextSelectionId})`,
     });
     renderScene();
   }
@@ -1063,6 +1079,7 @@ export function bootstrap() {
           canonicalGears: simulation.sceneGraph.canonicalGears,
           extraGears: simulation.sceneGraph.extraGears,
           extraJoints: simulation.sceneGraph.extraJoints,
+          parentChildEdges: simulation.sceneGraph.parentChildEdges,
         },
       };
     }
@@ -1349,6 +1366,7 @@ export function bootstrap() {
         canonicalGears: simulation.sceneGraph.canonicalGears,
         extraGears: simulation.sceneGraph.extraGears,
         extraJoints: simulation.sceneGraph.extraJoints,
+        parentChildEdges: simulation.sceneGraph.parentChildEdges,
       },
       _meta: {
         app: EXPORT_META.app,
@@ -1464,6 +1482,7 @@ export function bootstrap() {
     };
     simulation.sceneGraph.extraGears = [];
     simulation.sceneGraph.extraJoints = [];
+    simulation.sceneGraph.parentChildEdges = [];
     rebuildNodeRegistry();
     simulation.selectedObjectId = getPrimaryDrivenGearId();
     simulation.sceneTreeDirty = true;
@@ -1539,7 +1558,7 @@ export function bootstrap() {
     simulation.sceneGraph.extraGears.push({
       id,
       label: `Gear${index}`,
-      parentId: shouldMesh ? null : simulation.sceneGraph.rootNodeId,
+      parentId: relationTarget.id,
       meshWith: shouldMesh ? relationTarget.id : null,
       module: canonicalModule,
       teeth: canonicalDrivenTeeth,
