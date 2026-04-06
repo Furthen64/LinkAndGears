@@ -1,24 +1,64 @@
 # Linkage + Gear Web Simulator (Python-based)
 
-## Goal
-LinkAndGear is a **minimal, self-hosted web application** that visualizes and animates a **single rotating gear driving a linkage connected to a slider (piston-cylinder style)**.
+## Overview
 
-This is **not a physics engine**. It is a **deterministic kinematic visualizer**.
+LinkAndGear is a **self-hosted web application** designed to visualize and animate a **gear-driven linkage mechanism**. It simulates a deterministic kinematic system where a rotating gear drives a crank, which is connected to a slider (piston-cylinder style). This tool is ideal for educational purposes, prototyping, and exploring basic kinematic systems.
 
-The first version should be intentionally simple, correct, and extensible.
+This is **not a physics engine**. It focuses solely on deterministic kinematics without considering forces, collisions, or dynamics.
 
-See TASK.md
-## Run locally
+## Features
 
-1. Start the development server (uses a local `venv` virtual environment, no global install required):
-   - `./run-backend.sh`
-2. Open `http://127.0.0.1:8000` in your browser.
+- **Mechanism Topology**:
+  - Single rotating gear with a configurable crank pin.
+  - Rigid connecting rod linking the crank to a slider.
+  - Slider constrained to 1D linear motion (horizontal or vertical).
+- **Customizable Parameters**:
+  - Gear radius, angular speed, and initial angle.
+  - Crank radius and offset.
+  - Connecting rod length.
+  - Slider axis orientation and offset.
+- **Rendering**:
+  - Clear visualization of all components (gear, crank, rod, slider).
+  - Configurable scene templates for colors, sizes, and styles.
+- **UI Controls**:
+  - Play/Pause simulation.
+  - Reset time.
+  - Adjust parameters via sliders or numeric inputs.
 
-Optional direct run (if you manage dependencies yourself):
-- `uvicorn backend.main:app --reload`
+## Run Locally
 
+1. **Start the development server**:
+   - Activate the virtual environment: `source venv/bin/activate`
+   - Run the backend: `./run-backend.sh`
+2. **Access the application**:
+   - Open `http://127.0.0.1:8000` in your browser.
 
-## Scene templates
+Alternatively, you can run the app directly using Uvicorn:
+`uvicorn backend.main:app --reload`
 
-Visual styling for the canvas scene is configurable via JSON templates in `backend/static/templates/`.
-The app loads `default-scene.json` at runtime so colors, line widths, tooth density, and component sizes can be adjusted without changing JavaScript.
+## File Structure
+
+```
+LinkAndGear/
+├─ backend/
+│  ├─ main.py          # FastAPI app
+│  └─ static/
+│     ├─ index.html    # Frontend entry point
+│     ├─ app.js        # Core simulation logic
+│     ├─ style.css     # Styling
+│     ├─ templates/    # JSON scene templates
+│     └─ workspaces/   # Example configurations
+├─ TASK.md             # Development goals and scope
+├─ README.md           # Project documentation
+```
+
+## Scene Templates
+
+Scene templates are JSON files located in `backend/static/templates/`. These templates allow you to configure the visual appearance of the simulation, including:
+
+- Colors
+- Line widths
+- Tooth density
+- Component sizes
+
+The default template is `default-scene.json`, but you can create and load custom templates.
