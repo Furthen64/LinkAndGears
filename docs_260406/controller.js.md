@@ -6,8 +6,11 @@ The `controller.js` file is the main part of the application that connects every
 
 ## Key Features
 
-- **Scene Setup**: Defines the default styles and settings for parts like gears, rails, and rods. (`DEFAULT_SCENE_TEMPLATE`)
+- **Scene Setup**: 
+Defines the default styles and settings for parts like gears, rails, and rods.(`DEFAULT_SCENE_TEMPLATE`)
+
 - **Combining Tools**: Uses calculations from `kinematics.js` and drawing tools from `renderer.js` to update the scene. (`computeState`, `createTransform`, `drawScene`)
+
 - **Customization**: Lets you change how the scene looks by modifying the default settings. (`DEFAULT_SCENE_TEMPLATE`)
 
 ## Code Skeleton
