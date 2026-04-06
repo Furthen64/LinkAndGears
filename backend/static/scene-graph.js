@@ -236,7 +236,15 @@ export function resolveLinkageGroups(sceneGraph = {}) {
   const registry = getNodeRegistry(sceneGraph);
   const rawGroups = Array.isArray(sceneGraph?.linkageGroups) ? sceneGraph.linkageGroups : [];
   if (rawGroups.length > 0) {
-    return rawGroups.map((group, index) => sanitizeLinkageGroup(group, registry, index + 1));
+    return rawGroups
+      .map((group, index) => sanitizeLinkageGroup(group, registry, index + 1))
+      .filter((group) => {
+        if (group.type === "slider-crank") {
+          return Boolean(group.inputGearId && group.linkageNodeId && group.sliderNodeId && group.groundNodeId);
+        }
+
+        return true;
+      });
   }
 
   return inferLegacyLinkageGroups(sceneGraph);

@@ -1414,7 +1414,13 @@ export function bootstrap() {
         sliderNodeId: deletedSet.has(group.sliderNodeId) ? null : group.sliderNodeId,
         groundNodeId: deletedSet.has(group.groundNodeId) ? null : group.groundNodeId,
       }))
-      .filter((group) => group.inputGearId || group.linkageNodeId || group.sliderNodeId || group.groundNodeId);
+      .filter((group) => {
+        if (group.type === "slider-crank") {
+          return Boolean(group.inputGearId && group.linkageNodeId && group.sliderNodeId && group.groundNodeId);
+        }
+
+        return group.inputGearId || group.linkageNodeId || group.sliderNodeId || group.groundNodeId;
+      });
 
     let nextSelectionId = nodeId;
     while (nextSelectionId && deletedSet.has(nextSelectionId)) {
