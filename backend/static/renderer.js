@@ -261,6 +261,72 @@ function computeGearNodes(params, state) {
   });
 }
 
+function computeSceneAnchorPoints(params = {}, state = {}, gearNodes = []) {
+  const anchors = Object.fromEntries(
+    gearNodes
+      .filter((node) => node && typeof node.id === "string" && Number.isFinite(node.center?.x) && Number.isFinite(node.center?.y))
+      .map((node) => [node.id, { x: node.center.x, y: node.center.y }])
+  );
+
+  if (anchors["gear-1"]) {
+    anchors["linkage-1"] = { ...anchors["gear-1"] };
+  }
+
+  if (Number.isFinite(state?.slider?.x) && Number.isFinite(state?.slider?.y)) {
+    anchors["slider-1"] = { x: state.slider.x, y: state.slider.y };
+  }
+
+  if (params?.slider_axis === "vertical") {
+    anchors["ground-1"] = { x: Number.isFinite(params?.slider_offset) ? params.slider_offset : 0, y: 0 };
+  } else {
+    anchors["ground-1"] = { x: 0, y: Number.isFinite(params?.slider_offset) ? params.slider_offset : 0 };
+  }
+
+  return anchors;
+}
+
+function computeJointNodes(params = {}, state = {}, gearNodes = []) {
+  const registry = params?.scene_graph?.nodeRegistry ?? {};
+  const rawJointNodes = Object.values(registry).filter((node) => node?.type === "joint-anchor");
+  if (rawJointNodes.length === 0) {
+    return [];
+  }
+
+  const anchorPoints = computeSceneAnchorPoints(params, state, gearNodes);
+  const siblingCountByParent = new Map();
+
+  return rawJointNodes.map((node) => {
+    const parentId = node?.parentId ?? node?.attachmentTargetId ?? null;
+    const parentAnchor = parentId ? anchorPoints[parentId] : null;
+    const explicitCenter = node?.center ?? {};
+
+    let center = null;
+    if (Number.isFinite(explicitCenter.x) && Number.isFinite(explicitCenter.y)) {
+      center = { x: explicitCenter.x, y: explicitCenter.y };
+    } else if (parentAnchor) {
+      const parentKey = parentId ?? "__root__";
+      const siblingIndex = siblingCountByParent.get(parentKey) ?? 0;
+      siblingCountByParent.set(parentKey, siblingIndex + 1);
+      const angle = (-Math.PI / 2) + siblingIndex * (Math.PI / 3);
+      const distance = 0.45;
+      center = {
+        x: parentAnchor.x + Math.cos(angle) * distance,
+        y: parentAnchor.y + Math.sin(angle) * distance,
+      };
+    } else {
+      center = { x: 0, y: 0 };
+    }
+
+    anchorPoints[node.id] = center;
+    return {
+      id: node.id,
+      label: node.label ?? node.id,
+      parentId,
+      center,
+    };
+  });
+}
+
 function drawGearNode(ctx, transform, params, scene, node) {
   const style = node.renderStyle ?? (node.role === "driver" ? scene.driverGear : scene.gear);
   const geometry = getGearGeometry(node.radius, params, style, transform, node.toothCount, node.module);
@@ -451,6 +517,7 @@ export function objectDetails(selection, params, state) {
   }
 
   const gearNodes = computeGearNodes(params, state);
+  const jointNodes = computeJointNodes(params, state, gearNodes);
   const selectedGearNode = gearNodes.find((node) => node.id === selection);
   if (selectedGearNode) {
     const relation = selectedGearNode.parentId ?? selectedGearNode.meshPartnerId ?? "None";
@@ -539,6 +606,17 @@ export function objectDetails(selection, params, state) {
     };
   }
 
+  const selectedJointNode = jointNodes.find((node) => node.id === selection);
+  if (selectedJointNode) {
+    return {
+      title: `Joint (${selectedJointNode.id})`,
+      details: [
+        ["Parent id", selectedJointNode.parentId ?? "None"],
+        ["Position", `(${formatValue(selectedJointNode.center.x)}, ${formatValue(selectedJointNode.center.y)})`],
+      ],
+    };
+  }
+
   return {
     title: `Scene node (${selection})`,
     details: [["Status", "Added in scene tree (visual placement pending)"]],
@@ -552,6 +630,7 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
   const hasGround = Boolean(sceneRegistry["ground-1"]);
   const t = createTransform(canvas, params, camera);
   const gearNodes = computeGearNodes(params, state).sort((a, b) => a.zIndex - b.zIndex);
+  const jointNodes = computeJointNodes(params, state, gearNodes);
   const crank = t.toCanvas(state.crank);
   const slider = t.toCanvas(state.slider);
   const isLightTheme = options.theme === "light";
@@ -627,6 +706,41 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
       sliderDimensions.heightPx
     );
   }
+
+  const jointRadiusPx = 6;
+  jointNodes.forEach((joint) => {
+    const jointCenter = t.toCanvas(joint.center);
+    const parentNode = joint.parentId
+      ? (gearNodes.find((node) => node.id === joint.parentId) ?? jointNodes.find((node) => node.id === joint.parentId) ?? null)
+      : null;
+    const parentCenterWorld = parentNode?.center
+      ?? (joint.parentId === "slider-1" ? state.slider : null)
+      ?? (joint.parentId === "ground-1"
+        ? (params.slider_axis === "vertical"
+          ? { x: params.slider_offset, y: 0 }
+          : { x: 0, y: params.slider_offset })
+        : null);
+
+    if (parentCenterWorld && Number.isFinite(parentCenterWorld.x) && Number.isFinite(parentCenterWorld.y)) {
+      const parentCanvas = t.toCanvas(parentCenterWorld);
+      ctx.strokeStyle = "rgba(125, 211, 252, 0.85)";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(parentCanvas.x, parentCanvas.y);
+      ctx.lineTo(jointCenter.x, jointCenter.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    ctx.fillStyle = selectedObject === joint.id ? "#f59e0b" : "#38bdf8";
+    ctx.strokeStyle = "#082f49";
+    ctx.lineWidth = selectedObject === joint.id ? 2.5 : 1.8;
+    ctx.beginPath();
+    ctx.arc(jointCenter.x, jointCenter.y, jointRadiusPx, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  });
 
   const selectionStroke = isLightTheme ? "#111827" : "#f8fafc";
   const selectionWidth = 2;
@@ -742,6 +856,13 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
       id: entry.node.id,
       contains(point) {
         return Math.hypot(point.x - entry.centerCanvas.x, point.y - entry.centerCanvas.y) <= entry.geometry.tipRadiusPx + 4;
+      },
+    })),
+    ...jointNodes.map((joint) => ({
+      id: joint.id,
+      contains(point) {
+        const centerCanvas = t.toCanvas(joint.center);
+        return Math.hypot(point.x - centerCanvas.x, point.y - centerCanvas.y) <= jointRadiusPx + 4;
       },
     })),
     ...slotRegions.map((slotRegion) => ({
