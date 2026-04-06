@@ -1,3 +1,5 @@
+import { normalizeNodeRole, normalizeNodeType, resolveLinkageGroups, resolvePrimaryDrivenGearId, resolveSceneRootGearId } from "./scene-graph.js";
+
 export const MIN_PRACTICAL_TOOTH_COUNT = 6;
 export const CENTER_DISTANCE_TOLERANCE = 1e-6;
 
@@ -36,35 +38,14 @@ function getNodeCenter(node) {
   };
 }
 
-function resolveGraphRootGear(sceneGraph = {}) {
-  const registry = sceneGraph.nodeRegistry ?? {};
-  const rootId = typeof sceneGraph.rootNodeId === "string" ? sceneGraph.rootNodeId : "motor-1";
-  const rootNode = registry[rootId];
-  if (rootNode && (rootNode.type === "motor" || rootNode.type === "gear")) {
-    return rootId;
-  }
-  if (registry["motor-1"]) {
-    return "motor-1";
-  }
-  return rootId;
-}
-
-function resolvePrimaryDrivenGear(sceneGraph = {}, rootId = "motor-1") {
-  const registry = sceneGraph.nodeRegistry ?? {};
-  const rootNode = registry[rootId];
-  if (!rootNode) {
-    return "gear-1";
-  }
-
-  const child = Object.values(registry).find((node) => {
-    if (!node || node.id === rootId) {
-      return false;
-    }
-    const attachment = node.meshWith ?? node.parentId ?? node.attachmentTargetId;
-    return attachment === rootId && (node.type === "gear" || node.role === "driven");
-  });
-
-  return child?.id ?? (registry["gear-1"] ? "gear-1" : rootId);
+function getLinkageGroupRuntimeValues(group = {}, params = {}) {
+  return {
+    crankRadius: Number.isFinite(Number(group?.crankRadius)) ? Number(group.crankRadius) : toFiniteNumber(params.crank_radius, 0),
+    rodLength: Number.isFinite(Number(group?.rodLength)) ? Number(group.rodLength) : toFiniteNumber(params.rod_length, Number.NaN),
+    sliderAxis: group?.sliderAxis === "vertical" ? "vertical" : (params.slider_axis === "vertical" ? "vertical" : "horizontal"),
+    sliderOffset: Number.isFinite(Number(group?.sliderOffset)) ? Number(group.sliderOffset) : toFiniteNumber(params.slider_offset, 0),
+    crankAngleOffset: Number.isFinite(Number(group?.crankAngleOffset)) ? Number(group.crankAngleOffset) : toFiniteNumber(params.crank_angle_offset, 0),
+  };
 }
 
 function nodeRegistryToGearList(sceneGraph = {}, params = {}) {
@@ -75,7 +56,7 @@ function nodeRegistryToGearList(sceneGraph = {}, params = {}) {
   ];
 
   const registryGears = Object.values(registry)
-    .filter((node) => node && (node.type === "motor" || node.type === "gear"))
+    .filter((node) => node && ["motor", "gear"].includes(normalizeNodeType(node.type)))
     .map((node) => ({
       id: node.id,
       angle: toFiniteNumber(node.angle, 0),
@@ -87,7 +68,9 @@ function nodeRegistryToGearList(sceneGraph = {}, params = {}) {
       center: node.center ?? node.pose,
       meshWith: node.meshWith,
       parentId: node.parentId,
-      role: node.type === "motor" ? "driver" : (node.role ?? "gear"),
+      role: normalizeNodeType(node.type) === "motor"
+        ? "driver"
+        : (["gear-driven", "driven", "primary-driven"].includes(normalizeNodeRole(node.role, node.type)) ? "driven" : (node.role ?? "gear")),
       showIndicator: node.showIndicator === true,
     }));
 
@@ -229,7 +212,11 @@ export function computeSceneState(sceneGraph, t) {
       return sceneGraph.rootNodeId;
     }
 
-    const explicitMotor = Object.values(gearsById).find((node) => node?.type === "motor" || node?.role === "motor");
+    const explicitMotor = Object.values(gearsById).find((node) => {
+      const nodeType = normalizeNodeType(node?.type);
+      const nodeRole = normalizeNodeRole(node?.role, nodeType);
+      return nodeType === "motor" || nodeRole === "motor-root";
+    });
     if (explicitMotor?.id) {
       return explicitMotor.id;
     }
@@ -244,7 +231,9 @@ export function computeSceneState(sceneGraph, t) {
     for (const id of Array.from(unresolved)) {
       const node = gearsById[id];
       const topologyParentId = node.parentId ?? node.attachmentTargetId;
-      const isMotorNode = node.type === "motor" || node.role === "motor" || node.role === "driver";
+      const normalizedType = normalizeNodeType(node.type);
+      const normalizedRole = normalizeNodeRole(node.role, normalizedType);
+      const isMotorNode = normalizedType === "motor" || normalizedRole === "motor-root" || normalizedRole === "driver";
       const isRootNode = node.id === rootNodeId;
       const parentId = isMotorNode || isRootNode ? null : topologyParentId;
 
@@ -389,8 +378,8 @@ export function computeState(params, t) {
   const canonicalCenterDistance = Number.isFinite(center_distance)
     ? center_distance
     : driver_radius + params.gear_radius;
-  const rootGearId = resolveGraphRootGear(params.scene_graph);
-  const drivenGearId = resolvePrimaryDrivenGear(params.scene_graph, rootGearId);
+  const rootGearId = resolveSceneRootGearId(params.scene_graph) ?? "motor-1";
+  const drivenGearId = resolvePrimaryDrivenGearId(params.scene_graph, rootGearId) ?? rootGearId;
   const rootRegistryNode = params.scene_graph?.nodeRegistry?.[rootGearId];
   const drivenRegistryNode = params.scene_graph?.nodeRegistry?.[drivenGearId];
 
@@ -462,7 +451,6 @@ export function computeState(params, t) {
 
   const driverTheta = sceneState.gearsById[rootGearId]?.angle ?? Number.NaN;
   const drivenTheta = sceneState.gearsById[drivenGearId]?.angle ?? Number.NaN;
-  const theta = drivenTheta + crank_angle_offset;
 
   const gearNodes = Object.values(sceneState.gearsById).map((node, index) => ({
     id: node.id,
@@ -481,13 +469,155 @@ export function computeState(params, t) {
     zIndex: index,
   }));
 
-  const crank = {
-    x: crank_radius * Math.cos(theta),
-    y: crank_radius * Math.sin(theta),
-  };
+  const linkageGroups = resolveLinkageGroups(params.scene_graph);
+  const linkageGroupsById = Object.fromEntries(
+    linkageGroups.map((group) => {
+      const groupParams = getLinkageGroupRuntimeValues(group, params);
+      const inputGear = sceneState.gearsById[group.inputGearId] ?? sceneState.gearsById[drivenGearId] ?? null;
+      if (!inputGear) {
+        return [group.id, {
+          id: group.id,
+          type: group.type,
+          inputGearId: group.inputGearId,
+          linkageNodeId: group.linkageNodeId,
+          sliderNodeId: group.sliderNodeId,
+          groundNodeId: group.groundNodeId,
+          valid: false,
+          invalidReason: `Missing input gear: ${group.inputGearId ?? "unknown"}`,
+          ...groupParams,
+          crank: { x: Number.NaN, y: Number.NaN },
+          slider: { x: Number.NaN, y: Number.NaN },
+          ground: { x: Number.NaN, y: Number.NaN },
+        }];
+      }
+
+      const theta = inputGear.angle + groupParams.crankAngleOffset;
+      const crank = {
+        x: inputGear.center.x + groupParams.crankRadius * Math.cos(theta),
+        y: inputGear.center.y + groupParams.crankRadius * Math.sin(theta),
+      };
+      const explicitGroundCenter = params.scene_graph?.nodeRegistry?.[group.groundNodeId]?.center;
+      const ground = explicitGroundCenter && Number.isFinite(explicitGroundCenter.x) && Number.isFinite(explicitGroundCenter.y)
+        ? { x: explicitGroundCenter.x, y: explicitGroundCenter.y }
+        : (groupParams.sliderAxis === "vertical"
+          ? { x: groupParams.sliderOffset, y: inputGear.center.y }
+          : { x: inputGear.center.x, y: groupParams.sliderOffset });
+
+      if (!Number.isFinite(groupParams.rodLength) || groupParams.rodLength <= 0) {
+        return [group.id, {
+          id: group.id,
+          type: group.type,
+          inputGearId: inputGear.id,
+          linkageNodeId: group.linkageNodeId,
+          sliderNodeId: group.sliderNodeId,
+          groundNodeId: group.groundNodeId,
+          valid: false,
+          invalidReason: "rod_length must be a positive finite number",
+          ...groupParams,
+          crank,
+          slider: { x: Number.NaN, y: Number.NaN },
+          ground,
+        }];
+      }
+
+      if (groupParams.sliderAxis === "horizontal") {
+        const deltaY = groupParams.sliderOffset - crank.y;
+        const discriminant = groupParams.rodLength * groupParams.rodLength - deltaY * deltaY;
+        if (discriminant < 0) {
+          return [group.id, {
+            id: group.id,
+            type: group.type,
+            inputGearId: inputGear.id,
+            linkageNodeId: group.linkageNodeId,
+            sliderNodeId: group.sliderNodeId,
+            groundNodeId: group.groundNodeId,
+            valid: false,
+            invalidReason: "No real horizontal slider intersection",
+            ...groupParams,
+            crank,
+            slider: { x: Number.NaN, y: groupParams.sliderOffset },
+            ground,
+          }];
+        }
+
+        const root = Math.sqrt(Math.max(0, discriminant));
+        const candidateA = crank.x + root;
+        const candidateB = crank.x - root;
+        return [group.id, {
+          id: group.id,
+          type: group.type,
+          inputGearId: inputGear.id,
+          linkageNodeId: group.linkageNodeId,
+          sliderNodeId: group.sliderNodeId,
+          groundNodeId: group.groundNodeId,
+          valid: true,
+          invalidReason: null,
+          ...groupParams,
+          crank,
+          slider: { x: Math.max(candidateA, candidateB), y: groupParams.sliderOffset },
+          ground,
+        }];
+      }
+
+      if (groupParams.sliderAxis === "vertical") {
+        const deltaX = groupParams.sliderOffset - crank.x;
+        const discriminant = groupParams.rodLength * groupParams.rodLength - deltaX * deltaX;
+        if (discriminant < 0) {
+          return [group.id, {
+            id: group.id,
+            type: group.type,
+            inputGearId: inputGear.id,
+            linkageNodeId: group.linkageNodeId,
+            sliderNodeId: group.sliderNodeId,
+            groundNodeId: group.groundNodeId,
+            valid: false,
+            invalidReason: "No real vertical slider intersection",
+            ...groupParams,
+            crank,
+            slider: { x: groupParams.sliderOffset, y: Number.NaN },
+            ground,
+          }];
+        }
+
+        const root = Math.sqrt(Math.max(0, discriminant));
+        const candidateA = crank.y + root;
+        const candidateB = crank.y - root;
+        return [group.id, {
+          id: group.id,
+          type: group.type,
+          inputGearId: inputGear.id,
+          linkageNodeId: group.linkageNodeId,
+          sliderNodeId: group.sliderNodeId,
+          groundNodeId: group.groundNodeId,
+          valid: true,
+          invalidReason: null,
+          ...groupParams,
+          crank,
+          slider: { x: groupParams.sliderOffset, y: Math.max(candidateA, candidateB) },
+          ground,
+        }];
+      }
+
+      return [group.id, {
+        id: group.id,
+        type: group.type,
+        inputGearId: inputGear.id,
+        linkageNodeId: group.linkageNodeId,
+        sliderNodeId: group.sliderNodeId,
+        groundNodeId: group.groundNodeId,
+        valid: false,
+        invalidReason: `Unsupported slider_axis: ${groupParams.sliderAxis}`,
+        ...groupParams,
+        crank,
+        slider: { x: Number.NaN, y: Number.NaN },
+        ground,
+      }];
+    }),
+  );
+  const primaryLinkageGroup = linkageGroupsById[linkageGroups[0]?.id] ?? null;
 
   const baseState = {
-    valid: true,
+    valid: primaryLinkageGroup?.valid !== false,
     gear_angle: drivenTheta,
     driver_angle: driverTheta,
     rootGearId,
@@ -495,74 +625,13 @@ export function computeState(params, t) {
     gearsById: sceneState.gearsById,
     gearNodes,
     jointsById: sceneState.jointsById,
-    crank,
-    slider: { x: 0, y: 0 },
+    linkageGroupsById,
+    crank: primaryLinkageGroup?.crank ?? { x: Number.NaN, y: Number.NaN },
+    slider: primaryLinkageGroup?.slider ?? { x: Number.NaN, y: Number.NaN },
+    invalidReason: primaryLinkageGroup?.invalidReason ?? null,
   };
 
-  if (!Number.isFinite(rod_length) || rod_length <= 0) {
-    return {
-      ...baseState,
-      valid: false,
-      invalidReason: "rod_length must be a positive finite number",
-    };
-  }
-
-  if (slider_axis === "horizontal") {
-    const deltaY = slider_offset - crank.y;
-    const discriminant = rod_length * rod_length - deltaY * deltaY;
-
-    if (discriminant < 0) {
-      return {
-        ...baseState,
-        valid: false,
-        invalidReason: "No real horizontal slider intersection",
-        slider: { x: Number.NaN, y: slider_offset },
-      };
-    }
-
-    const root = Math.sqrt(Math.max(0, discriminant));
-    const candidateA = crank.x + root;
-    const candidateB = crank.x - root;
-
-    const chosenX = Math.max(candidateA, candidateB);
-
-    return {
-      ...baseState,
-      slider: { x: chosenX, y: slider_offset },
-    };
-  }
-
-  if (slider_axis === "vertical") {
-    const deltaX = slider_offset - crank.x;
-    const discriminant = rod_length * rod_length - deltaX * deltaX;
-
-    if (discriminant < 0) {
-      return {
-        ...baseState,
-        valid: false,
-        invalidReason: "No real vertical slider intersection",
-        slider: { x: slider_offset, y: Number.NaN },
-      };
-    }
-
-    const root = Math.sqrt(Math.max(0, discriminant));
-    const candidateA = crank.y + root;
-    const candidateB = crank.y - root;
-
-    const chosenY = Math.max(candidateA, candidateB);
-
-    return {
-      ...baseState,
-      slider: { x: slider_offset, y: chosenY },
-    };
-  }
-
-  return {
-    ...baseState,
-    valid: false,
-    invalidReason: `Unsupported slider_axis: ${slider_axis}`,
-    slider: { x: Number.NaN, y: Number.NaN },
-  };
+  return baseState;
 }
 
 if (typeof globalThis !== "undefined") {

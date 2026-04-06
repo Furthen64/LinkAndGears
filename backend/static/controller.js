@@ -1,5 +1,6 @@
 import { computeState } from "./kinematics.js";
 import { createTransform, drawScene, objectDetails } from "./renderer.js";
+import { buildParentChildEdges, resolveLinkageGroups, sanitizeLinkageGroup } from "./scene-graph.js";
 
 export const DEFAULT_SCENE_TEMPLATE = {
   rail: {
@@ -202,6 +203,7 @@ function getControls() {
     toggle_scene_tree: document.getElementById("toggle-scene-tree"),
     scene_tree_content: document.getElementById("scene-tree-content"),
     add_gear: document.getElementById("add-gear"),
+    add_linkage: document.getElementById("add-linkage"),
     add_joint: document.getElementById("add-joint"),
     delete_selected: document.getElementById("delete-selected"),
     status_debug: document.getElementById("status-debug"),
@@ -240,6 +242,27 @@ export function bootstrap() {
       { key: "inputRpm", label: "Motor speed (RPM)", input: "number", step: "0.1", defaultValue: 17.2 },
       { key: "inputAngularSpeed", label: "Manual angular speed (rad/s)", input: "number", step: "0.1", defaultValue: 1.8 },
     ],
+    "linkage-anchor": [
+      { key: "label", label: "Label", input: "text", defaultValue: "Linkage" },
+      { key: "linkageGroupLabel", label: "Group label", input: "text", defaultValue: "Linkage" },
+      { key: "inputGearId", label: "Input gear id", input: "text", defaultValue: "gear-1" },
+      { key: "crank_radius", label: "Crank radius", input: "number", step: "0.1", min: "0.01", defaultValue: 1.2 },
+      { key: "rod_length", label: "Rod length", input: "number", step: "0.1", min: "0.01", defaultValue: 3.2 },
+    ],
+    slider: [
+      { key: "label", label: "Label", input: "text", defaultValue: "Slider" },
+      { key: "slider_axis", label: "Slider axis", input: "select", options: ["horizontal", "vertical"], defaultValue: "horizontal" },
+      { key: "slider_offset", label: "Rail offset", input: "number", step: "0.1", defaultValue: 0 },
+    ],
+    "ground-anchor": [
+      { key: "label", label: "Label", input: "text", defaultValue: "Ground" },
+      { key: "slider_axis", label: "Slider axis", input: "select", options: ["horizontal", "vertical"], defaultValue: "horizontal" },
+      { key: "slider_offset", label: "Rail offset", input: "number", step: "0.1", defaultValue: 0 },
+    ],
+    "joint-anchor": [
+      { key: "label", label: "Label", input: "text", defaultValue: "Joint" },
+      { key: "parentId", label: "Parent id", input: "text", defaultValue: "" },
+    ],
   };
   const WORKSPACE_PRESETS = {
     default: "/static/workspaces/default.json",
@@ -267,6 +290,17 @@ export function bootstrap() {
         "motor-1": { showIndicator: false, teeth: 18, radiusMode: "moduleTeeth", radius: 0.9, inputRpm: 17.2, inputAngularSpeed: 1.8, meshWith: null },
         "gear-1": { showIndicator: true, teeth: 32, radiusMode: "moduleTeeth", radius: 1.6, meshWith: "motor-1" },
       },
+      linkageGroups: [
+        {
+          id: "linkage-group-1",
+          label: "Primary Linkage",
+          type: "slider-crank",
+          inputGearId: "gear-1",
+          linkageNodeId: "linkage-1",
+          sliderNodeId: "slider-1",
+          groundNodeId: "ground-1",
+        },
+      ],
       extraGears: [],
       extraJoints: [],
       deletedCanonicalNodeIds: [],
@@ -303,6 +337,17 @@ export function bootstrap() {
         "motor-1": { showIndicator: false, teeth: 18, radiusMode: "moduleTeeth", radius: 0.9, inputRpm: 17.2, inputAngularSpeed: 1.8, meshWith: null },
         "gear-1": { showIndicator: true, teeth: 32, radiusMode: "moduleTeeth", radius: 1.6, meshWith: "motor-1" },
       },
+      linkageGroups: [
+        {
+          id: "linkage-group-1",
+          label: "Primary Linkage",
+          type: "slider-crank",
+          inputGearId: "gear-1",
+          linkageNodeId: "linkage-1",
+          sliderNodeId: "slider-1",
+          groundNodeId: "ground-1",
+        },
+      ],
       extraGears: [],
       extraJoints: [],
       deletedCanonicalNodeIds: [],
@@ -367,6 +412,137 @@ export function bootstrap() {
     return Array.isArray(simulation.sceneGraph.deletedCanonicalNodeIds)
       ? simulation.sceneGraph.deletedCanonicalNodeIds
       : [];
+  }
+
+  function normalizeSliderAxisValue(rawAxis, fallback = "horizontal") {
+    return rawAxis === "vertical" ? "vertical" : fallback;
+  }
+
+  function getLinkageGroupDefaults(source = {}) {
+    return {
+      crankRadius: toPositiveFinite(Number(source?.crankRadius ?? source?.["crank-radius"]), 1.2),
+      rodLength: toPositiveFinite(Number(source?.rodLength ?? source?.["rod-length"]), 3.2),
+      sliderAxis: normalizeSliderAxisValue(source?.sliderAxis ?? source?.["slider-axis"]),
+      sliderOffset: Number.isFinite(Number(source?.sliderOffset ?? source?.["slider-offset"]))
+        ? Number(source.sliderOffset ?? source["slider-offset"])
+        : 0,
+      crankAngleOffset: Number.isFinite(Number(source?.crankAngleOffset ?? source?.["crank-angle-offset"]))
+        ? Number(source.crankAngleOffset ?? source["crank-angle-offset"])
+        : 0,
+    };
+  }
+
+  function syncLinkageGroups() {
+    const registry = simulation.sceneGraph.nodeRegistry ?? {};
+    const resolvedGroups = resolveLinkageGroups({
+      rootNodeId: simulation.sceneGraph.rootNodeId,
+      nodeRegistry: registry,
+      linkageGroups: simulation.sceneGraph.linkageGroups,
+    });
+
+    simulation.sceneGraph.linkageGroups = resolvedGroups.map((group, index) => sanitizeLinkageGroup(
+      group,
+      registry,
+      index + 1,
+      getLinkageGroupDefaults(group),
+    ));
+  }
+
+  function syncLegacySceneStoresFromRegistry() {
+    const registry = simulation.sceneGraph.nodeRegistry ?? {};
+    const rootNode = registry[getRootNodeId()] ?? null;
+    const drivenNode = registry[getPrimaryDrivenGearId()] ?? null;
+
+    if (rootNode) {
+      simulation.sceneGraph.canonicalGears["motor-1"] = {
+        ...(simulation.sceneGraph.canonicalGears?.["motor-1"] ?? {}),
+        showIndicator: rootNode.showIndicator === true,
+        module: getSceneModule(),
+        teeth: Number.isFinite(Number(rootNode.teeth)) ? Number(rootNode.teeth) : 18,
+        radiusMode: rootNode.radiusMode === "manual" ? "manual" : "moduleTeeth",
+        radius: Number.isFinite(Number(rootNode.radius)) ? Number(rootNode.radius) : 0.9,
+        meshWith: null,
+        inputRpm: Number.isFinite(Number(rootNode.inputRpm)) ? Number(rootNode.inputRpm) : 17.2,
+        inputAngularSpeed: Number.isFinite(Number(rootNode.inputAngularSpeed)) ? Number(rootNode.inputAngularSpeed) : 1.8,
+      };
+    }
+
+    if (drivenNode && drivenNode.id !== rootNode?.id) {
+      simulation.sceneGraph.canonicalGears["gear-1"] = {
+        ...(simulation.sceneGraph.canonicalGears?.["gear-1"] ?? {}),
+        showIndicator: drivenNode.showIndicator !== false,
+        module: getSceneModule(),
+        teeth: Number.isFinite(Number(drivenNode.teeth)) ? Number(drivenNode.teeth) : 32,
+        radiusMode: drivenNode.radiusMode === "manual" ? "manual" : "moduleTeeth",
+        radius: Number.isFinite(Number(drivenNode.radius)) ? Number(drivenNode.radius) : 1.6,
+        meshWith: drivenNode.meshWith ?? rootNode?.id ?? null,
+      };
+    }
+
+    const groupedNodeIds = new Set(
+      getResolvedLinkageGroups().flatMap((group) => [
+        group.linkageNodeId,
+        group.sliderNodeId,
+        group.groundNodeId,
+      ].filter((value) => typeof value === "string" && value.length > 0)),
+    );
+
+    simulation.sceneGraph.extraGears = Object.values(registry)
+      .filter((node) => normalizeNodeType(node?.type) === "gear" && node.id !== drivenNode?.id)
+      .map((node, index) => sanitizeExtraGearNode(node, index + 2));
+    simulation.sceneGraph.extraJoints = Object.values(registry)
+      .filter((node) => {
+        const nodeType = normalizeNodeType(node?.type);
+        return nodeType !== "gear"
+          && nodeType !== "motor"
+          && !groupedNodeIds.has(node.id);
+      })
+      .map((node, index) => sanitizeExtraJointNode(node, index + 1));
+    simulation.sceneGraph.deletedCanonicalNodeIds = ["gear-1", "linkage-1", "slider-1", "ground-1"]
+      .filter((nodeId) => !registry[nodeId]);
+  }
+
+  function setSceneNodeRegistry(nextRegistry) {
+    simulation.sceneGraph.nodeRegistry = nextRegistry ?? {};
+    simulation.sceneGraph.parentChildEdges = buildParentChildEdges(simulation.sceneGraph.nodeRegistry);
+    syncLinkageGroups();
+    syncLegacySceneStoresFromRegistry();
+  }
+
+  function buildRegistryFromLegacySceneData() {
+    const registry = {};
+    const canonicalNodes = canonicalSceneNodes();
+    Object.values(canonicalNodes).forEach((node) => {
+      registry[node.id] = { ...node };
+    });
+
+    simulation.sceneGraph.extraGears.forEach((node) => {
+      registry[node.id] = {
+        ...node,
+        type: "gear",
+        attachmentTargetId: node.parentId ?? node.meshWith ?? simulation.sceneGraph.rootNodeId,
+      };
+    });
+
+    simulation.sceneGraph.extraJoints.forEach((node) => {
+      registry[node.id] = {
+        ...node,
+        type: normalizeNodeType(node.type ?? "joint-anchor"),
+        attachmentTargetId: node.parentId ?? node.attachmentTargetId ?? getPrimaryLinkageGroup()?.linkageNodeId ?? simulation.sceneGraph.rootNodeId,
+      };
+    });
+
+    return registry;
+  }
+
+  function getDerivedAdditionalGearNodes() {
+    return Object.values(simulation.sceneGraph.nodeRegistry ?? {}).filter((node) => {
+      if (normalizeNodeType(node?.type) !== "gear") {
+        return false;
+      }
+
+      return node.id !== getRootNodeId();
+    });
   }
 
   function getSceneModule() {
@@ -527,32 +703,21 @@ export function bootstrap() {
   }
 
   function rebuildNodeRegistry() {
-    const registry = {};
-    const canonicalNodes = canonicalSceneNodes();
-    Object.values(canonicalNodes).forEach((node) => {
-      registry[node.id] = { ...node };
-    });
+    const normalizedRegistry = Object.fromEntries(
+      Object.entries(simulation.sceneGraph.nodeRegistry ?? {}).map(([nodeId, node]) => [
+        nodeId,
+        sanitizeRegistryNode(node, { id: nodeId, label: node?.label ?? nodeId }),
+      ]),
+    );
 
-    simulation.sceneGraph.extraGears.forEach((node) => {
-      registry[node.id] = {
-        ...node,
-        type: "gear",
-        attachmentTargetId: node.parentId ?? node.meshWith ?? simulation.sceneGraph.rootNodeId,
-      };
-    });
+    const rootNodeId = getRootNodeId();
+    if (normalizedRegistry[rootNodeId]) {
+      normalizedRegistry[rootNodeId].parentId = null;
+      normalizedRegistry[rootNodeId].attachmentTargetId = null;
+      normalizedRegistry[rootNodeId].meshWith = null;
+    }
 
-    simulation.sceneGraph.extraJoints.forEach((node) => {
-      registry[node.id] = {
-        ...node,
-        type: normalizeNodeType(node.type ?? "joint-anchor"),
-        attachmentTargetId: node.parentId ?? node.attachmentTargetId ?? "linkage-1",
-      };
-    });
-
-    simulation.sceneGraph.nodeRegistry = registry;
-    simulation.sceneGraph.parentChildEdges = Object.values(registry)
-      .filter((node) => typeof node?.parentId === "string" && typeof node?.id === "string" && node.id !== node.parentId)
-      .map((node) => ({ parentId: node.parentId, childId: node.id }));
+    setSceneNodeRegistry(normalizedRegistry);
   }
 
   function buildEdgeMaps() {
@@ -574,9 +739,128 @@ export function bootstrap() {
     return { parentByChild, childrenByParent };
   }
 
+  function getResolvedLinkageGroups() {
+    return Array.isArray(simulation.sceneGraph.linkageGroups) ? simulation.sceneGraph.linkageGroups : [];
+  }
+
+  function getPrimaryLinkageGroup() {
+    return getResolvedLinkageGroups()[0] ?? null;
+  }
+
+  function getActiveLinkageGroup() {
+    return getLinkageGroupForNodeId(simulation.selectedObjectId) ?? getPrimaryLinkageGroup();
+  }
+
+  function getLinkageGroupParamValue(group, key) {
+    const defaults = getLinkageGroupDefaults();
+    if (!group || typeof key !== "string") {
+      return defaults[key] ?? undefined;
+    }
+
+    switch (key) {
+      case "crankRadius":
+      case "rodLength":
+      case "sliderOffset":
+      case "crankAngleOffset": {
+        const numericValue = Number(group[key]);
+        return Number.isFinite(numericValue)
+          ? numericValue
+          : defaults[key];
+      }
+      case "sliderAxis":
+        return normalizeSliderAxisValue(group[key], defaults.sliderAxis);
+      default:
+        return group[key] ?? defaults[key];
+    }
+  }
+
+  function syncLinkageControlsFromGroup(group = getActiveLinkageGroup()) {
+    const resolvedGroup = group ?? getPrimaryLinkageGroup();
+    controls.crank_radius.value = String(getLinkageGroupParamValue(resolvedGroup, "crankRadius"));
+    controls.rod_length.value = String(getLinkageGroupParamValue(resolvedGroup, "rodLength"));
+    controls.slider_axis.value = getLinkageGroupParamValue(resolvedGroup, "sliderAxis");
+    controls.slider_offset.value = String(getLinkageGroupParamValue(resolvedGroup, "sliderOffset"));
+  }
+
+  function applyLinkageControlsToGroup(group = getActiveLinkageGroup()) {
+    if (!group) {
+      return;
+    }
+
+    group.crankRadius = toPositiveFinite(Number(controls.crank_radius?.value), getLinkageGroupParamValue(group, "crankRadius"));
+    group.rodLength = toPositiveFinite(Number(controls.rod_length?.value), getLinkageGroupParamValue(group, "rodLength"));
+    group.sliderAxis = normalizeSliderAxisValue(controls.slider_axis?.value, getLinkageGroupParamValue(group, "sliderAxis"));
+    group.sliderOffset = Number.isFinite(Number(controls.slider_offset?.value))
+      ? Number(controls.slider_offset.value)
+      : getLinkageGroupParamValue(group, "sliderOffset");
+  }
+
+  function getLinkageGroupForNodeId(nodeId) {
+    if (typeof nodeId !== "string") {
+      return null;
+    }
+
+    return getResolvedLinkageGroups().find((group) => (
+      group.linkageNodeId === nodeId
+      || group.sliderNodeId === nodeId
+      || group.groundNodeId === nodeId
+    )) ?? null;
+  }
+
+  function getEditableFieldValue(node, fieldKey) {
+    if (!node || typeof fieldKey !== "string") {
+      return undefined;
+    }
+
+    const linkageGroup = getLinkageGroupForNodeId(node.id);
+    switch (fieldKey) {
+      case "linkageGroupLabel":
+        return linkageGroup?.label ?? "";
+      case "inputGearId":
+        return linkageGroup?.inputGearId ?? "";
+      case "crank_radius":
+        return getLinkageGroupParamValue(linkageGroup, "crankRadius");
+      case "rod_length":
+        return getLinkageGroupParamValue(linkageGroup, "rodLength");
+      case "slider_axis":
+        return getLinkageGroupParamValue(linkageGroup, "sliderAxis");
+      case "slider_offset":
+        return getLinkageGroupParamValue(linkageGroup, "sliderOffset");
+      default:
+        return node[fieldKey];
+    }
+  }
+
+  function updateLinkedInputGear(linkageGroup, inputGearId) {
+    if (!linkageGroup || typeof inputGearId !== "string") {
+      return false;
+    }
+
+    const targetGear = simulation.sceneGraph.nodeRegistry?.[inputGearId] ?? null;
+    if (!targetGear || !["motor", "gear"].includes(normalizeNodeType(targetGear.type))) {
+      return false;
+    }
+
+    linkageGroup.inputGearId = inputGearId;
+    const linkageNode = simulation.sceneGraph.nodeRegistry?.[linkageGroup.linkageNodeId] ?? null;
+    if (linkageNode) {
+      linkageNode.parentId = inputGearId;
+      linkageNode.attachmentTargetId = inputGearId;
+    }
+
+    simulation.sceneTreeDirty = true;
+
+    return true;
+  }
+
   function isGearNodeId(nodeId) {
-    return typeof nodeId === "string"
-      && (nodeId === getRootNodeId() || nodeId === getPrimaryDrivenGearId() || /^gear-\d+$/.test(nodeId));
+    const node = simulation.sceneGraph.nodeRegistry?.[nodeId];
+    if (!node) {
+      return false;
+    }
+
+    const nodeType = normalizeNodeType(node.type);
+    return nodeType === "motor" || nodeType === "gear";
   }
 
   function getSelectedGearNode() {
@@ -668,10 +952,11 @@ export function bootstrap() {
   }
 
   function getGearLookup() {
-    return {
-      ...canonicalGearNodes(),
-      ...Object.fromEntries(simulation.sceneGraph.extraGears.map((node) => [node.id, node])),
-    };
+    return Object.fromEntries(
+      Object.values(simulation.sceneGraph.nodeRegistry ?? {})
+        .filter((node) => ["motor", "gear"].includes(normalizeNodeType(node?.type)))
+        .map((node) => [node.id, node]),
+    );
   }
 
   function resolveMeshCenter(anchor, node, fallbackDirection = { x: 1, y: 0 }) {
@@ -694,7 +979,7 @@ export function bootstrap() {
   }
 
   function realignMeshedGearCenters() {
-    const extraGears = simulation.sceneGraph.extraGears;
+    const extraGears = getDerivedAdditionalGearNodes();
     if (!Array.isArray(extraGears) || extraGears.length === 0) {
       return 0;
     }
@@ -742,7 +1027,7 @@ export function bootstrap() {
   }
 
   function keepGearMeshesSane(deletedNodeId = null, preferredAnchorId = null) {
-    const extraGears = simulation.sceneGraph.extraGears;
+    const extraGears = getDerivedAdditionalGearNodes();
     if (!Array.isArray(extraGears) || extraGears.length === 0) {
       return 0;
     }
@@ -851,6 +1136,7 @@ export function bootstrap() {
       id: rawNode?.id ?? fallback.id,
       label: rawNode?.label ?? fallback.label ?? rawNode?.id ?? fallback.id,
       type: normalizeNodeType(rawNode?.type ?? fallback.type ?? "gear"),
+      role: typeof rawNode?.role === "string" ? rawNode.role : (fallback.role ?? null),
       parentId: typeof rawNode?.parentId === "string" ? rawNode.parentId : (fallback.parentId ?? null),
       attachmentTargetId: typeof rawNode?.attachmentTargetId === "string"
         ? rawNode.attachmentTargetId
@@ -904,25 +1190,22 @@ export function bootstrap() {
     const sceneModule = getSceneModule();
     simulation.sceneGraph.module = sceneModule;
 
-    Object.values(simulation.sceneGraph.canonicalGears ?? {}).forEach((gear) => {
-      if (!gear || typeof gear !== "object") {
+    Object.values(simulation.sceneGraph.nodeRegistry ?? {}).forEach((node) => {
+      const nodeType = normalizeNodeType(node?.type);
+      if (!["motor", "gear"].includes(nodeType)) {
         return;
       }
-      gear.module = sceneModule;
-      syncGearRadius(gear);
+
+      node.module = sceneModule;
+      syncGearRadius(node);
     });
 
-    simulation.sceneGraph.extraGears.forEach((gear) => {
-      if (!gear || typeof gear !== "object") {
-        return;
-      }
-      gear.module = sceneModule;
-      syncGearRadius(gear);
-    });
+    syncLegacySceneStoresFromRegistry();
   }
 
   function applySceneGraphConfig(sceneConfig) {
     const graph = sceneConfig?.sceneGraph ?? {};
+    const linkageDefaults = getLinkageGroupDefaults(sceneConfig);
     const inputExtraGears = Array.isArray(graph.extraGears) ? graph.extraGears : [];
     const inputExtraJoints = Array.isArray(graph.extraJoints) ? graph.extraJoints : [];
     const canonicalGears = graph.canonicalGears ?? {};
@@ -968,6 +1251,9 @@ export function bootstrap() {
     };
     simulation.sceneGraph.extraGears = inputExtraGears.map((node, index) => sanitizeExtraGearNode(node, index + 2));
     simulation.sceneGraph.extraJoints = inputExtraJoints.map((node, index) => sanitizeExtraJointNode(node, index + 1));
+    simulation.sceneGraph.linkageGroups = Array.isArray(graph.linkageGroups)
+      ? graph.linkageGroups.map((group, index) => sanitizeLinkageGroup(group, graph.nodeRegistry ?? {}, index + 1, linkageDefaults))
+      : [];
     simulation.sceneGraph.deletedCanonicalNodeIds = Array.isArray(graph.deletedCanonicalNodeIds)
       ? graph.deletedCanonicalNodeIds.filter((id) => typeof id === "string")
       : [];
@@ -981,8 +1267,6 @@ export function bootstrap() {
         : ["motor", "joint-anchor"],
     };
     simulation.sceneTreeDirty = true;
-    keepGearMeshesSane();
-    rebuildNodeRegistry();
     const providedRegistry = graph?.nodeRegistry && typeof graph.nodeRegistry === "object" ? graph.nodeRegistry : null;
     if (providedRegistry && Object.keys(providedRegistry).length > 0) {
       const resolvedRegistry = {};
@@ -992,45 +1276,11 @@ export function bootstrap() {
         }
         resolvedRegistry[nodeId] = sanitizeRegistryNode(node, { id: nodeId, label: nodeId });
       });
-      simulation.sceneGraph.nodeRegistry = resolvedRegistry;
-      simulation.sceneGraph.parentChildEdges = Object.values(resolvedRegistry)
-        .filter((node) => typeof node?.parentId === "string" && node.parentId !== node.id)
-        .map((node) => ({ parentId: node.parentId, childId: node.id }));
-
-      const rootFromRegistry = resolvedRegistry["motor-1"] ?? resolvedRegistry[simulation.sceneGraph.rootNodeId];
-      const drivenFromRegistry = resolvedRegistry["gear-1"]
-        ?? Object.values(resolvedRegistry).find((node) => node?.meshWith === (rootFromRegistry?.id ?? "motor-1") && node.type === "gear");
-      if (rootFromRegistry) {
-        simulation.sceneGraph.canonicalGears["motor-1"] = {
-          showIndicator: rootFromRegistry.showIndicator === true,
-          module: sharedModule,
-          teeth: Number.isFinite(rootFromRegistry.teeth) ? rootFromRegistry.teeth : 18,
-          radiusMode: rootFromRegistry.radiusMode === "manual" ? "manual" : "moduleTeeth",
-          radius: Number.isFinite(rootFromRegistry.radius) ? rootFromRegistry.radius : 0.9,
-          meshWith: null,
-          inputRpm: Number.isFinite(rootFromRegistry.inputRpm) ? rootFromRegistry.inputRpm : 17.2,
-          inputAngularSpeed: Number.isFinite(rootFromRegistry.inputAngularSpeed) ? rootFromRegistry.inputAngularSpeed : 1.8,
-        };
-      }
-      if (drivenFromRegistry) {
-        simulation.sceneGraph.canonicalGears["gear-1"] = {
-          showIndicator: drivenFromRegistry.showIndicator !== false,
-          module: sharedModule,
-          teeth: Number.isFinite(drivenFromRegistry.teeth) ? drivenFromRegistry.teeth : 32,
-          radiusMode: drivenFromRegistry.radiusMode === "manual" ? "manual" : "moduleTeeth",
-          radius: Number.isFinite(drivenFromRegistry.radius) ? drivenFromRegistry.radius : 1.6,
-          meshWith: drivenFromRegistry.meshWith ?? rootFromRegistry?.id ?? "motor-1",
-        };
-      }
-      simulation.sceneGraph.extraGears = Object.values(resolvedRegistry)
-        .filter((node) => node.type === "gear" && node.id !== "gear-1")
-        .map((node, index) => sanitizeExtraGearNode(node, index + 2));
-      simulation.sceneGraph.extraJoints = Object.values(resolvedRegistry)
-        .filter((node) => node.type !== "gear" && node.type !== "motor" && !["linkage-1", "slider-1", "ground-1"].includes(node.id))
-        .map((node, index) => sanitizeExtraJointNode(node, index + 1));
-
-      simulation.sceneGraph.deletedCanonicalNodeIds = ["gear-1", "linkage-1", "slider-1", "ground-1"]
-        .filter((nodeId) => !resolvedRegistry[nodeId]);
+      setSceneNodeRegistry(resolvedRegistry);
+    } else {
+      setSceneNodeRegistry(buildRegistryFromLegacySceneData());
+      keepGearMeshesSane();
+      rebuildNodeRegistry();
     }
     if (!simulation.sceneGraph.nodeRegistry?.[simulation.sceneGraph.rootNodeId]) {
       simulation.sceneGraph.rootNodeId = "motor-1";
@@ -1042,6 +1292,8 @@ export function bootstrap() {
     if (simulation.sceneGraph.canonicalGears?.["motor-1"]) {
       simulation.sceneGraph.canonicalGears["motor-1"].meshWith = null;
     }
+    syncLinkageGroups();
+    syncLinkageControlsFromGroup(getPrimaryLinkageGroup());
     syncSharedModuleControl();
     applySceneModuleToGears();
     const genesisType = simulation.sceneGraph.nodeRegistry?.[simulation.sceneGraph.genesisNodeId]?.type ?? "motor";
@@ -1091,6 +1343,7 @@ export function bootstrap() {
 
   function selectObjectById(objectId) {
     simulation.selectedObjectId = objectId;
+    syncLinkageControlsFromGroup();
     clearPendingGearSlot();
     renderScene();
   }
@@ -1106,12 +1359,11 @@ export function bootstrap() {
   }
 
   function isDeletableTreeNode(nodeId) {
-    if (["gear-1", "linkage-1", "slider-1", "ground-1"].includes(nodeId)) {
-      return true;
+    if (typeof nodeId !== "string" || !simulation.sceneGraph.nodeRegistry?.[nodeId]) {
+      return false;
     }
-    const isExtraGear = simulation.sceneGraph.extraGears.some((node) => node.id === nodeId);
-    const isExtraJoint = simulation.sceneGraph.extraJoints.some((node) => node.id === nodeId);
-    return isExtraGear || isExtraJoint;
+
+    return nodeId !== getRootNodeId() && nodeId !== simulation.sceneGraph.genesisNodeId;
   }
 
   function deleteTreeNodeById(nodeId) {
@@ -1151,14 +1403,18 @@ export function bootstrap() {
     }
 
     const deletedSet = new Set(subtreeIds);
-    const canonicalDeletedIds = ["gear-1", "linkage-1", "slider-1", "ground-1"].filter((id) => deletedSet.has(id));
-    if (canonicalDeletedIds.length > 0) {
-      const priorDeletedCanonical = new Set(getDeletedCanonicalNodeIds());
-      canonicalDeletedIds.forEach((id) => priorDeletedCanonical.add(id));
-      simulation.sceneGraph.deletedCanonicalNodeIds = Array.from(priorDeletedCanonical);
-    }
-    simulation.sceneGraph.extraGears = simulation.sceneGraph.extraGears.filter((node) => !deletedSet.has(node.id));
-    simulation.sceneGraph.extraJoints = simulation.sceneGraph.extraJoints.filter((node) => !deletedSet.has(node.id));
+    const nextRegistry = Object.fromEntries(
+      Object.entries(simulation.sceneGraph.nodeRegistry ?? {}).filter(([candidateId]) => !deletedSet.has(candidateId)),
+    );
+    simulation.sceneGraph.linkageGroups = getResolvedLinkageGroups()
+      .map((group) => ({
+        ...group,
+        inputGearId: deletedSet.has(group.inputGearId) ? null : group.inputGearId,
+        linkageNodeId: deletedSet.has(group.linkageNodeId) ? null : group.linkageNodeId,
+        sliderNodeId: deletedSet.has(group.sliderNodeId) ? null : group.sliderNodeId,
+        groundNodeId: deletedSet.has(group.groundNodeId) ? null : group.groundNodeId,
+      }))
+      .filter((group) => group.inputGearId || group.linkageNodeId || group.sliderNodeId || group.groundNodeId);
 
     let nextSelectionId = nodeId;
     while (nextSelectionId && deletedSet.has(nextSelectionId)) {
@@ -1168,10 +1424,11 @@ export function bootstrap() {
       nextSelectionId = getRootNodeId();
     }
 
+    setSceneNodeRegistry(nextRegistry);
     keepGearMeshesSane();
     rebuildNodeRegistry();
     syncParamsFromControls();
-    simulation.selectedObjectId = nextSelectionId;
+    selectObjectById(nextSelectionId);
 
     simulation.sceneTreeDirty = true;
     setStatusMessage(
@@ -1291,18 +1548,20 @@ export function bootstrap() {
   }
 
   function normalizeControlParams() {
-    const motorNode = canonicalGearNodes()["motor-1"];
-    const drivenNode = canonicalGearNodes()["gear-1"];
+    const gearLookup = getGearLookup();
+    const motorNode = gearLookup[getRootNodeId()] ?? canonicalGearNodes()["motor-1"];
+    const drivenNode = gearLookup[getPrimaryDrivenGearId()] ?? canonicalGearNodes()["gear-1"];
+    const primaryLinkageGroup = getPrimaryLinkageGroup();
     const motorRpmInput = Number(motorNode.inputRpm);
     const motorAngularInput = Number(motorNode.inputAngularSpeed);
     const hasRpmInput = Number.isFinite(motorRpmInput);
     const angularSpeedFromRpm = hasRpmInput ? (2 * Math.PI * motorRpmInput) / 60 : Number.NaN;
     const resolvedModule = getSceneModule();
     const parsed = {
-      crank_radius: Number(controls.crank_radius?.value ?? 1.2),
-      rod_length: Number(controls.rod_length?.value ?? 3.2),
-      slider_offset: Number(controls.slider_offset?.value ?? 0),
-      slider_axis: controls.slider_axis?.value === "vertical" ? "vertical" : "horizontal",
+      crank_radius: getLinkageGroupParamValue(primaryLinkageGroup, "crankRadius"),
+      rod_length: getLinkageGroupParamValue(primaryLinkageGroup, "rodLength"),
+      slider_offset: getLinkageGroupParamValue(primaryLinkageGroup, "sliderOffset"),
+      slider_axis: getLinkageGroupParamValue(primaryLinkageGroup, "sliderAxis"),
     };
     const driver_pitch_diameter = motorNode.radius * 2;
     const driven_pitch_diameter = drivenNode.radius * 2;
@@ -1346,10 +1605,7 @@ export function bootstrap() {
           genesisNodeId: simulation.sceneGraph.genesisNodeId,
           genesisPolicy: simulation.sceneGraph.genesisPolicy,
           nodeRegistry: simulation.sceneGraph.nodeRegistry,
-          canonicalGears: simulation.sceneGraph.canonicalGears,
-          extraGears: simulation.sceneGraph.extraGears,
-          extraJoints: simulation.sceneGraph.extraJoints,
-          deletedCanonicalNodeIds: simulation.sceneGraph.deletedCanonicalNodeIds,
+          linkageGroups: simulation.sceneGraph.linkageGroups,
           parentChildEdges: simulation.sceneGraph.parentChildEdges,
         },
       };
@@ -1387,10 +1643,7 @@ export function bootstrap() {
     if (!nodeId) {
       return;
     }
-    const canonicalTarget = simulation.sceneGraph.canonicalGears?.[nodeId] ?? null;
-    const extraGearTarget = simulation.sceneGraph.extraGears.find((node) => node.id === nodeId) ?? null;
-    const extraJointTarget = simulation.sceneGraph.extraJoints.find((node) => node.id === nodeId) ?? null;
-    const persistentTarget = canonicalTarget ?? extraGearTarget ?? extraJointTarget;
+    const persistentTarget = simulation.sceneGraph.nodeRegistry?.[nodeId] ?? null;
     if (!persistentTarget) {
       return;
     }
@@ -1403,14 +1656,96 @@ export function bootstrap() {
       nextValue = rawValue === true;
     }
 
+    const linkageGroup = getLinkageGroupForNodeId(nodeId);
+    if (key === "linkageGroupLabel" && linkageGroup) {
+      linkageGroup.label = String(rawValue ?? "").trim() || linkageGroup.id;
+      rebuildNodeRegistry();
+      syncParamsFromControls();
+      renderScene();
+      return;
+    }
+
+    if (key === "inputGearId" && linkageGroup) {
+      const nextInputGearId = String(rawValue ?? "").trim();
+      if (!updateLinkedInputGear(linkageGroup, nextInputGearId)) {
+        setStatusMessage("Linkage input must reference an existing motor or gear node.", {
+          debug: `updateSelectedNodeParam rejected inputGearId=${nextInputGearId} for linkageGroup=${linkageGroup.id}.`,
+          level: "warn",
+        });
+        return;
+      }
+      simulation.sceneTreeDirty = true;
+      rebuildNodeRegistry();
+      syncParamsFromControls();
+      renderScene();
+      return;
+    }
+
+    if (key === "crank_radius") {
+      if (linkageGroup) {
+        linkageGroup.crankRadius = toPositiveFinite(Number(rawValue), getLinkageGroupParamValue(linkageGroup, "crankRadius"));
+        syncLinkageControlsFromGroup(linkageGroup);
+      }
+      syncParamsFromControls();
+      renderScene();
+      return;
+    }
+
+    if (key === "rod_length") {
+      if (linkageGroup) {
+        linkageGroup.rodLength = toPositiveFinite(Number(rawValue), getLinkageGroupParamValue(linkageGroup, "rodLength"));
+        syncLinkageControlsFromGroup(linkageGroup);
+      }
+      syncParamsFromControls();
+      renderScene();
+      return;
+    }
+
+    if (key === "slider_axis") {
+      if (linkageGroup) {
+        linkageGroup.sliderAxis = normalizeSliderAxisValue(rawValue);
+        syncLinkageControlsFromGroup(linkageGroup);
+      }
+      syncParamsFromControls();
+      renderScene();
+      return;
+    }
+
+    if (key === "slider_offset") {
+      if (linkageGroup) {
+        linkageGroup.sliderOffset = Number.isFinite(Number(rawValue))
+          ? Number(rawValue)
+          : getLinkageGroupParamValue(linkageGroup, "sliderOffset");
+        syncLinkageControlsFromGroup(linkageGroup);
+      }
+      syncParamsFromControls();
+      renderScene();
+      return;
+    }
+
+    if (key === "parentId") {
+      const nextParentId = String(rawValue ?? "").trim();
+      persistentTarget.parentId = nextParentId || null;
+      persistentTarget.attachmentTargetId = nextParentId || null;
+      simulation.sceneTreeDirty = true;
+      rebuildNodeRegistry();
+      syncParamsFromControls();
+      renderScene();
+      return;
+    }
+
     persistentTarget[key] = nextValue;
+    if (key === "label") {
+      simulation.sceneTreeDirty = true;
+    }
     if (["teeth", "radius", "radiusMode", "meshWith"].includes(key)) {
-      if (persistentTarget.type === "motor" || persistentTarget.type === "gear" || canonicalTarget || extraGearTarget) {
+      if (["motor", "gear"].includes(normalizeNodeType(persistentTarget.type))) {
         syncGearRadius(persistentTarget);
       }
       realignMeshedGearCenters();
       keepGearMeshesSane();
     }
+    syncLegacySceneStoresFromRegistry();
     rebuildNodeRegistry();
     syncParamsFromControls();
     renderScene();
@@ -1426,7 +1761,7 @@ export function bootstrap() {
       ? JSON.stringify({
         id: selectedNode.id,
         type: selectedNode.type,
-        fields: schema.map((field) => [field.key, selectedNode[field.key] ?? field.defaultValue ?? null]),
+        fields: schema.map((field) => [field.key, getEditableFieldValue(selectedNode, field.key) ?? field.defaultValue ?? null]),
       })
       : "";
     if (nextSignature === selectedNodeEditorSignature) {
@@ -1443,6 +1778,7 @@ export function bootstrap() {
       const row = document.createElement("label");
       row.textContent = field.label;
       let input;
+      const fieldValue = getEditableFieldValue(selectedNode, field.key);
       if (field.input === "select") {
         input = document.createElement("select");
         (field.options ?? []).forEach((optionValue) => {
@@ -1451,7 +1787,7 @@ export function bootstrap() {
           option.textContent = optionValue;
           input.appendChild(option);
         });
-        input.value = String(selectedNode[field.key] ?? field.defaultValue ?? "");
+        input.value = String(fieldValue ?? field.defaultValue ?? "");
       } else {
         input = document.createElement("input");
         input.type = field.input;
@@ -1465,9 +1801,9 @@ export function bootstrap() {
           input.max = String(field.max);
         }
         if (field.input === "checkbox") {
-          input.checked = selectedNode[field.key] === true;
+          input.checked = fieldValue === true;
         } else {
-          input.value = String(selectedNode[field.key] ?? field.defaultValue ?? "");
+          input.value = String(fieldValue ?? field.defaultValue ?? "");
         }
       }
       input.addEventListener("input", () => {
@@ -1636,8 +1972,29 @@ export function bootstrap() {
 
   function buildCurrentSceneJson() {
     const sceneConfig = {};
+    const primaryLinkageGroup = getPrimaryLinkageGroup();
 
     SCENE_EXPORT_CONTROL_IDS.forEach((controlId) => {
+      if (controlId === "crank-radius") {
+        sceneConfig[controlId] = String(getLinkageGroupParamValue(primaryLinkageGroup, "crankRadius"));
+        return;
+      }
+
+      if (controlId === "rod-length") {
+        sceneConfig[controlId] = String(getLinkageGroupParamValue(primaryLinkageGroup, "rodLength"));
+        return;
+      }
+
+      if (controlId === "slider-axis") {
+        sceneConfig[controlId] = String(getLinkageGroupParamValue(primaryLinkageGroup, "sliderAxis"));
+        return;
+      }
+
+      if (controlId === "slider-offset") {
+        sceneConfig[controlId] = String(getLinkageGroupParamValue(primaryLinkageGroup, "sliderOffset"));
+        return;
+      }
+
       const control = document.getElementById(controlId);
       if (!control) {
         return;
@@ -1658,6 +2015,7 @@ export function bootstrap() {
         genesisNodeId: simulation.sceneGraph.genesisNodeId,
         genesisPolicy: simulation.sceneGraph.genesisPolicy,
         nodeRegistry: simulation.sceneGraph.nodeRegistry,
+        linkageGroups: simulation.sceneGraph.linkageGroups,
         parentChildEdges: simulation.sceneGraph.parentChildEdges,
       },
       _meta: {
@@ -1709,12 +2067,13 @@ export function bootstrap() {
     applySceneConfig(preset);
   }
 
-  function attachLiveUpdates(control) {
+  function attachLinkageControlUpdates(control) {
     if (!control) {
       return;
     }
 
     const handleInput = () => {
+      applyLinkageControlsToGroup();
       syncParamsFromControls();
       renderScene();
     };
@@ -1728,7 +2087,7 @@ export function bootstrap() {
     controls.rod_length,
     controls.slider_offset,
     controls.slider_axis,
-  ].forEach(attachLiveUpdates);
+  ].forEach(attachLinkageControlUpdates);
 
   const handleSharedModuleInput = () => {
     simulation.sceneGraph.module = toPositiveFinite(Number(controls.shared_module?.value), getSceneModule());
@@ -1775,28 +2134,13 @@ export function bootstrap() {
     const baseline = await loadNewSceneBaseline();
     simulation.timeSeconds = 0;
     simulation.lastTimestamp = performance.now();
-    simulation.sceneGraph.rootNodeId = "motor-1";
-    simulation.sceneGraph.genesisNodeId = "motor-1";
-    simulation.sceneGraph.genesisPolicy = {
-      allowedTypes: ["motor", "joint-anchor"],
-    };
-    simulation.sceneGraph.module = 0.1;
-    simulation.sceneGraph.canonicalGears = {
-      "motor-1": { showIndicator: false, teeth: 18, radiusMode: "moduleTeeth", radius: 0.9, inputRpm: 17.2, inputAngularSpeed: 1.8, meshWith: null },
-      "gear-1": { showIndicator: true, teeth: 32, radiusMode: "moduleTeeth", radius: 1.6, meshWith: "motor-1" },
-    };
-    simulation.sceneGraph.extraGears = [];
-    simulation.sceneGraph.extraJoints = [];
-    simulation.sceneGraph.deletedCanonicalNodeIds = [];
-    simulation.sceneGraph.parentChildEdges = [];
-    rebuildNodeRegistry();
-    simulation.selectedObjectId = getPrimaryDrivenGearId();
+    applySceneConfig(baseline);
+    selectObjectById(getPrimaryDrivenGearId());
     simulation.sceneTreeDirty = true;
     clearPendingGearSlot();
     setStatusMessage("New scene created.", {
       debug: `Loaded baseline workspace from ${NEW_SCENE_BASELINE_PATH}.`,
     });
-    applySceneConfig(baseline);
   });
 
   controls.save_scene_json?.addEventListener("click", () => {
@@ -1834,17 +2178,20 @@ export function bootstrap() {
 
   controls.add_gear?.addEventListener("click", () => {
     syncParamsFromControls();
-    const index = getNextDynamicNodeIndex("gear", simulation.sceneGraph.extraGears);
+    const index = getNextDynamicNodeIndex(
+      "gear",
+      Object.values(simulation.sceneGraph.nodeRegistry ?? {}).filter((node) => /^gear-\d+$/.test(node?.id ?? "")),
+    );
     const id = `gear-${index}`;
     const canonicalModule = getSceneModule();
-    const canonicalDrivenTeeth = Math.max(1, Math.round(toPositiveFinite(Number(simulation.sceneGraph.canonicalGears?.["gear-1"]?.teeth), 24)));
+    const gearLookup = getGearLookup();
+    const primaryDrivenGear = gearLookup[getPrimaryDrivenGearId()] ?? null;
+    const canonicalDrivenTeeth = Math.max(
+      1,
+      Math.round(toPositiveFinite(Number(primaryDrivenGear?.teeth ?? simulation.params.driven_teeth), 24)),
+    );
     const radius = (canonicalModule * canonicalDrivenTeeth) / 2;
-    const selectedIsGear = typeof simulation.selectedObjectId === "string" && (simulation.selectedObjectId === getPrimaryDrivenGearId() || /^gear-\d+$/.test(simulation.selectedObjectId));
-
-    const gearLookup = {
-      ...canonicalGearNodes(),
-      ...Object.fromEntries(simulation.sceneGraph.extraGears.map((node) => [node.id, node])),
-    };
+    const selectedIsGear = typeof simulation.selectedObjectId === "string" && isGearNodeId(simulation.selectedObjectId);
 
     const slot = simulation.pendingGearSlot;
     const selectedGearFromSlot = typeof slot?.sourceGearId === "string" ? gearLookup[slot.sourceGearId] : null;
@@ -1871,19 +2218,22 @@ export function bootstrap() {
             y: relationTarget.center.y,
           };
 
-    simulation.sceneGraph.extraGears.push({
+    simulation.sceneGraph.nodeRegistry[id] = sanitizeRegistryNode({
       id,
       label: `Gear${index}`,
+      type: "gear",
       parentId: relationTarget.id,
       meshWith: shouldMesh ? relationTarget.id : null,
       module: canonicalModule,
       teeth: canonicalDrivenTeeth,
+      radiusMode: "moduleTeeth",
       radius,
+      attachmentTargetId: relationTarget.id,
       centerMode: shouldMesh ? "manual" : "parent",
       center,
       linkageAnchor: null,
       showIndicator: false,
-    });
+    }, { id, label: `Gear${index}`, type: "gear" });
     rebuildNodeRegistry();
     syncParamsFromControls();
     simulation.sceneTreeDirty = true;
@@ -1891,12 +2241,126 @@ export function bootstrap() {
     selectObjectById(id);
   });
 
+  controls.add_linkage?.addEventListener("click", () => {
+    syncParamsFromControls();
+
+    const registry = simulation.sceneGraph.nodeRegistry ?? {};
+    const gearLookup = getGearLookup();
+    const selectedGear = isGearNodeId(simulation.selectedObjectId)
+      ? gearLookup[simulation.selectedObjectId]
+      : null;
+    const inputGear = selectedGear
+      ?? gearLookup[getPrimaryDrivenGearId()]
+      ?? gearLookup[getRootNodeId()]
+      ?? null;
+
+    if (!inputGear) {
+      setStatusMessage("Unable to add linkage: no motor or gear node is available.", {
+        debug: "add_linkage aborted because no valid input gear was resolved.",
+        level: "warn",
+      });
+      return;
+    }
+
+    const linkageIndex = getNextDynamicNodeIndex(
+      "linkage",
+      Object.values(registry).filter((node) => /^linkage-\d+$/.test(node?.id ?? "")),
+    );
+    const sliderIndex = getNextDynamicNodeIndex(
+      "slider",
+      Object.values(registry).filter((node) => /^slider-\d+$/.test(node?.id ?? "")),
+    );
+    const groundIndex = getNextDynamicNodeIndex(
+      "ground",
+      Object.values(registry).filter((node) => /^ground-\d+$/.test(node?.id ?? "")),
+    );
+    const groupIndex = getNextDynamicNodeIndex("linkage-group", getResolvedLinkageGroups());
+
+    const linkageId = `linkage-${linkageIndex}`;
+    const sliderId = `slider-${sliderIndex}`;
+    const groundId = `ground-${groundIndex}`;
+    const groupId = `linkage-group-${groupIndex}`;
+
+    const activeLinkageGroup = getActiveLinkageGroup();
+    const defaultCrankRadius = activeLinkageGroup
+      ? getLinkageGroupParamValue(activeLinkageGroup, "crankRadius")
+      : Math.max(0.4, Number(inputGear.radius) * 0.75);
+    const defaultRodLength = activeLinkageGroup
+      ? Math.max(getLinkageGroupParamValue(activeLinkageGroup, "rodLength"), defaultCrankRadius)
+      : defaultCrankRadius + Math.max(1, defaultCrankRadius);
+    const defaultSliderOffset = activeLinkageGroup
+      ? getLinkageGroupParamValue(activeLinkageGroup, "sliderOffset")
+      : (Number.isFinite(Number(inputGear.center?.y)) ? Number(inputGear.center.y) : 0);
+    const groundX = Number.isFinite(Number(inputGear.center?.x))
+      ? Number(inputGear.center.x) + Math.max(defaultRodLength, Number(inputGear.radius) * 3)
+      : Math.max(defaultRodLength, Number(inputGear.radius) * 3);
+
+    simulation.sceneGraph.nodeRegistry[linkageId] = sanitizeRegistryNode({
+      id: linkageId,
+      label: `Linkage${linkageIndex}`,
+      type: "linkage-anchor",
+      role: "linkage-anchor",
+      parentId: inputGear.id,
+      attachmentTargetId: inputGear.id,
+    }, { id: linkageId, label: `Linkage${linkageIndex}`, type: "linkage-anchor" });
+
+    simulation.sceneGraph.nodeRegistry[sliderId] = sanitizeRegistryNode({
+      id: sliderId,
+      label: `Slider${sliderIndex}`,
+      type: "slider",
+      role: "slider-carriage",
+      parentId: linkageId,
+      attachmentTargetId: linkageId,
+    }, { id: sliderId, label: `Slider${sliderIndex}`, type: "slider" });
+
+    simulation.sceneGraph.nodeRegistry[groundId] = sanitizeRegistryNode({
+      id: groundId,
+      label: `Ground${groundIndex}`,
+      type: "ground-anchor",
+      role: "ground-reference",
+      parentId: linkageId,
+      attachmentTargetId: linkageId,
+      center: { x: groundX, y: defaultSliderOffset },
+    }, { id: groundId, label: `Ground${groundIndex}`, type: "ground-anchor" });
+
+    simulation.sceneGraph.linkageGroups = [
+      ...getResolvedLinkageGroups(),
+      {
+        id: groupId,
+        label: `Linkage ${groupIndex}`,
+        type: "slider-crank",
+        inputGearId: inputGear.id,
+        linkageNodeId: linkageId,
+        sliderNodeId: sliderId,
+        groundNodeId: groundId,
+        crankRadius: defaultCrankRadius,
+        rodLength: defaultRodLength,
+        sliderAxis: "horizontal",
+        sliderOffset: defaultSliderOffset,
+      },
+    ];
+
+    rebuildNodeRegistry();
+    syncParamsFromControls();
+    simulation.sceneTreeDirty = true;
+    selectObjectById(linkageId);
+    setStatusMessage("Added linkage group.", {
+      debug: `add_linkage created ${groupId} on input gear ${inputGear.id} with horizontal rail at y=${defaultSliderOffset}.`,
+    });
+  });
+
   controls.add_joint?.addEventListener("click", () => {
-    const index = getNextDynamicNodeIndex("joint", simulation.sceneGraph.extraJoints);
+    const index = getNextDynamicNodeIndex(
+      "joint",
+      Object.values(simulation.sceneGraph.nodeRegistry ?? {}).filter((node) => /^joint-\d+$/.test(node?.id ?? "")),
+    );
     const id = `joint-${index}`;
+    const primaryLinkageGroup = getPrimaryLinkageGroup();
     const attachmentTargetId = simulation.sceneGraph.nodeRegistry?.[simulation.selectedObjectId]
       ? simulation.selectedObjectId
-      : (simulation.sceneGraph.nodeRegistry?.["linkage-1"] ? "linkage-1" : getRootNodeId());
+      : (primaryLinkageGroup?.linkageNodeId && simulation.sceneGraph.nodeRegistry?.[primaryLinkageGroup.linkageNodeId]
+        ? primaryLinkageGroup.linkageNodeId
+        : getRootNodeId());
     if (!simulation.sceneGraph.nodeRegistry?.[attachmentTargetId]) {
       setStatusMessage("Unable to add joint: no valid attachment target found.", {
         debug: `add_joint aborted; target=${attachmentTargetId}.`,
@@ -1904,13 +2368,13 @@ export function bootstrap() {
       });
       return;
     }
-    simulation.sceneGraph.extraJoints.push({
+    simulation.sceneGraph.nodeRegistry[id] = sanitizeRegistryNode({
       id,
       label: `Joint${index}`,
       type: "joint-anchor",
       parentId: attachmentTargetId,
       attachmentTargetId,
-    });
+    }, { id, label: `Joint${index}`, type: "joint-anchor" });
     rebuildNodeRegistry();
     syncParamsFromControls();
     simulation.sceneTreeDirty = true;
@@ -1944,19 +2408,8 @@ export function bootstrap() {
     if (simulation.sceneGraph.nodeRegistry?.[selectedId]) {
       simulation.sceneGraph.nodeRegistry[selectedId].showIndicator = nextValue;
     }
-    if (selectedId === getRootNodeId() || selectedId === getPrimaryDrivenGearId()) {
-      simulation.sceneGraph.canonicalGears[selectedId] = {
-        ...(simulation.sceneGraph.canonicalGears[selectedId] ?? {}),
-        showIndicator: nextValue,
-      };
-    } else {
-      const gearNode = simulation.sceneGraph.extraGears.find((node) => node.id === selectedId);
-      if (!gearNode) {
-        return;
-      }
-      gearNode.showIndicator = nextValue;
-    }
 
+    syncLegacySceneStoresFromRegistry();
     syncParamsFromControls();
     renderScene();
   });
@@ -1997,8 +2450,7 @@ export function bootstrap() {
     }
 
     clearPendingGearSlot();
-    simulation.selectedObjectId = matched ? matched.id : null;
-    renderScene();
+    selectObjectById(matched ? matched.id : null);
   });
 
   canvas.addEventListener("wheel", (event) => {
@@ -2108,6 +2560,7 @@ export function bootstrap() {
   applyTheme(controls.theme_mode?.value);
   syncSharedModuleControl();
   applyInputConstraints(simulation.scene.inputConstraints);
+  setSceneNodeRegistry(buildRegistryFromLegacySceneData());
   rebuildNodeRegistry();
   renderSceneTree();
   void applyPreset(controls.workspace_preset?.value ?? "default");

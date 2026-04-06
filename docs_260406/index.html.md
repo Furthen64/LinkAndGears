@@ -1,67 +1,248 @@
-# Structural Explanation of index.html
+# index.html Reference
 
 ## Purpose
 
-The `index.html` file is the main HTML document for the LinkAndGears application. It defines the structure of the user interface (UI) and links to the necessary styles and scripts.
+`index.html` defines the static DOM contract for the LinkAndGears frontend. It does not contain application logic, but it provides every element that `controller.js` expects to find by ID.
 
-## Key Sections
+That makes this file more than a visual shell. It is effectively the wiring surface between HTML, CSS, and the JavaScript controller.
 
-### 1. **Head Section**
+## Document Head
 
-- **Metadata**: Sets the character encoding to UTF-8 and ensures the page is responsive with the viewport meta tag.
-- **Title**: Displays "LinkAndGears" as the page title.
-- **Stylesheet**: Links to the `style.css` file for styling.
+### `<!doctype html>` and `<html lang="en">`
 
-### 2. **Body Section**
+Establish standards mode and set the document language for accessibility and browser behavior.
 
-The body is divided into three main panels:
+### `<meta charset="UTF-8">`
 
-#### a. **Scene Tree Panel**
+Ensures text is interpreted as UTF-8.
 
-- **Purpose**: Displays the hierarchy of the mechanism.
-- **Key Elements**:
-  - Header with a title and a toggle button.
-  - Action buttons for adding gears, joints, and deleting selected items.
-  - A tree structure (`<ul>`) to represent the mechanism hierarchy.
+### `<meta name="viewport" ...>`
 
-#### b. **Viewer Panel**
+Makes the layout responsive by matching the viewport width to the device width.
 
-- **Purpose**: Displays the main canvas and controls for interacting with the mechanism.
-- **Key Elements**:
-  - Workspace preset dropdown to select different configurations.
-  - Buttons for creating a new scene, resetting the view, refreshing, saving, and controlling playback.
-  - A `<canvas>` element for rendering the mechanism.
-  - Tips for interacting with the canvas (e.g., zoom, pan).
-  - Selection and debug panels for showing details about selected objects and debug information.
+### `<title>LinkAndGears</title>`
 
-#### c. **Controls Panel**
+Sets the browser tab title.
 
-- **Purpose**: Provides controls for modifying the mechanism and viewing derived values.
-- **Key Elements**:
-  - Theme selector to switch between dark and light modes.
-  - Input fields for global scene properties (e.g., crank radius, rod length).
-  - A section for editing properties of selected nodes.
-  - Read-only fields for derived values like effective driver radius and motor speed.
+### `<link rel="stylesheet" href="/static/style.css">`
 
-### 3. **Script Section**
+Loads the global stylesheet used by every panel and control.
 
-- **Purpose**: Links the `app.js` script to add interactivity to the page.
-- **Type**: Uses the `type="module"` attribute to enable ES6 module support.
+## Body-Level State
 
-## Hierarchy Overview
+### `<body data-theme="dark">`
 
-1. **Main Layout**
-   - `<main>`: Contains the three primary panels (Scene Tree, Viewer, Controls).
-2. **Scene Tree Panel**
-   - `<aside>`: Represents the scene tree with actions and hierarchy.
-3. **Viewer Panel**
-   - `<section>`: Contains the canvas, controls, and debug information.
-4. **Controls Panel**
-   - `<section>`: Provides inputs for modifying the scene and viewing derived values.
-5. **Script**
-   - `<script>`: Links the JavaScript file for functionality.
+The `data-theme` attribute is the current theme source of truth for CSS and for `controller.js` theme lookup.
 
-## Notes
+Behavioral role:
 
-- The file is designed to be responsive and accessible, with ARIA attributes for better usability.
-- The structure ensures a clear separation of concerns, with styling in `style.css` and interactivity in `app.js`.
+- the controller reads it to determine whether the scene should render in light or dark mode,
+- the controller updates it when the theme selector changes,
+- CSS can switch visual styles based on the attribute value.
+
+## Main Layout
+
+### `<main class="layout">`
+
+The application is divided into three major regions:
+
+- scene tree panel,
+- viewer panel,
+- controls panel.
+
+This three-column structure mirrors the app architecture:
+
+- structure editing on the left,
+- visualization in the center,
+- parameter editing on the right.
+
+## Scene Tree Panel
+
+### `<aside id="scene-tree-panel" class="scene-tree-panel" aria-label="Scene tree">`
+
+Hosts the hierarchical scene editor.
+
+### Header
+
+- `<h2>Scene Tree</h2>` labels the region.
+- `<button id="toggle-scene-tree">` collapses or expands the panel.
+
+The button includes:
+
+- `aria-expanded`, which the controller updates,
+- `aria-controls="scene-tree-content"`, which connects the button to the collapsible content region.
+
+### Actions Area
+
+Inside `#scene-tree-content` there are three structural edit buttons:
+
+- `#add-gear`: creates a new extra gear,
+- `#add-joint`: creates a new joint-anchor node,
+- `#delete-selected`: deletes the currently selected deletable node.
+
+### Help Text
+
+The scene tree help paragraph explains a key UI guarantee: selection is synchronized both ways between the tree and the canvas.
+
+### `<ul id="scene-tree" role="tree">`
+
+The controller populates this list dynamically with nested tree items.
+
+Why it matters:
+
+- it starts empty in static HTML,
+- `controller.js` builds the tree from the scene graph at runtime,
+- ARIA `role="tree"` gives assistive tech a better structural hint.
+
+## Viewer Panel
+
+### `<section class="viewer-panel">`
+
+This is the central visualization area.
+
+### Title
+
+`<h1>LinkAndGears</h1>` provides the primary page heading.
+
+### Top Controls
+
+The `.viewer-top-controls` toolbar contains workspace and playback controls.
+
+#### `#workspace-preset`
+
+Selects a saved workspace configuration. The default options are:
+
+- `default`,
+- `compact-fast`,
+- `large-slow`,
+- `vertical-slider`.
+
+The controller loads the corresponding JSON preset when the value changes.
+
+#### Scene and view buttons
+
+- `#new-scene`: resets to a clean scene baseline.
+- `#reset-view`: restores camera zoom and pan.
+- `#refresh-view`: rebuilds the node registry and re-renders.
+- `#save-scene-json`: exports the current scene as JSON.
+
+#### Time controls
+
+- `#play-pause`: toggles simulation playback.
+- `#reset-time`: resets simulation time to zero.
+
+#### Help paragraph
+
+The toolbar help text explains that choosing a preset also updates mechanism inputs.
+
+### Canvas
+
+### `<canvas id="mechanism-canvas" width="760" height="460">`
+
+This is the rendering target used by `renderer.js`.
+
+Behavioral role:
+
+- displays the gears, linkage, slider, grid, and overlays,
+- receives click, wheel, and pointer events for selection, zoom, and pan,
+- serves as the geometric basis for hit testing.
+
+The `aria-label` describes the canvas content for accessibility.
+
+### Interaction Tips
+
+Two paragraphs explain the interaction model:
+
+- selection tip for inspectable objects,
+- camera tip for zooming and panning.
+
+These lines are static documentation embedded in the interface.
+
+### Selection Panel
+
+### `<section class="selection-panel" aria-live="polite">`
+
+Displays the currently selected object’s details.
+
+Important child elements:
+
+- `#selection-name`: the selected object title,
+- `#selection-details`: a definition list filled with object metadata,
+- `#selection-show-indicator-row`: a label row the controller shows only for gear selections,
+- `#selection-show-indicator`: checkbox used to toggle rotation indicator visibility.
+
+The `aria-live="polite"` attribute allows updates to be announced without being too disruptive.
+
+### Status and Debug
+
+- `#status`: primary human-readable status line.
+- `#status-debug`: lower-level debug channel used for internal messages, warnings, and error diagnostics.
+
+The debug panel is useful because the controller surfaces both friendly and technical explanations separately.
+
+## Controls Panel
+
+### `<section class="controls-panel" aria-label="Mechanism controls">`
+
+Contains scene-wide editable inputs, selected-node editors, and derived read-only outputs.
+
+### Global scene controls
+
+These IDs are read directly by the controller:
+
+- `#theme-mode`
+- `#shared-module`
+- `#crank-radius`
+- `#rod-length`
+- `#slider-offset`
+- `#slider-axis`
+
+Together they define the scene-level mechanism parameters.
+
+### Selected Node Properties Area
+
+The second `.selection-panel` section is actually a dynamic property editor for the selected scene node.
+
+Important elements:
+
+- `#node-properties-empty`: placeholder text shown when no editable node is selected,
+- `#selected-node-properties`: container that the controller fills with generated form fields.
+
+This area is where `controller.js` renders node-specific editors from its internal node parameter schema.
+
+### Derived Values Panel
+
+These inputs are read-only reflections of normalized scene data:
+
+- `#derived-driver-radius`
+- `#derived-gear-radius`
+- `#derived-angular-speed`
+
+They are not direct sources of truth. The controller writes to them after it normalizes the editable inputs.
+
+## Script Loading
+
+### `<script type="module" src="/static/app.js"></script>`
+
+Loads the module entrypoint that eventually calls `bootstrap()`.
+
+Why `type="module"` matters:
+
+- allows ES module imports,
+- defers execution until the document is parsed,
+- keeps global namespace pollution low.
+
+## Runtime Contract With JavaScript
+
+`index.html` is tightly coupled to `controller.js` through element IDs. If one of these IDs changes without updating the controller, parts of the UI silently stop working.
+
+The most important contracts are:
+
+- the canvas and status elements must exist or bootstrap exits early,
+- every control ID in `getControls()` must resolve correctly for its feature to work,
+- the script tag must load `app.js`, not `controller.js` directly, because `app.js` owns startup timing.
+
+## Summary
+
+`index.html` is the static UI skeleton and DOM API for the app. It lays out the editing workflow, provides accessibility hooks, and defines the exact element set that the controller depends on for simulation control, scene editing, inspection, and rendering.
+
