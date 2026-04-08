@@ -1121,21 +1121,28 @@ function drawIsoDisc(ctx, x, y, radius, height, fill, stroke) {
   ctx.strokeStyle = stroke;
   ctx.lineWidth = 1.25;
 
+  const discHalfWidth = Math.max(3, radius * 0.36);
+  const discHalfHeight = Math.max(6, radius * 0.92);
+  const thickness = Math.max(3, height * 0.38);
+  const leftX = x - thickness / 2;
+  const rightX = x + thickness / 2;
+
   ctx.beginPath();
-  ctx.ellipse(x, y - height, radius, radius * 0.4, 0, 0, Math.PI * 2);
+  ctx.moveTo(leftX, y - discHalfHeight);
+  ctx.lineTo(rightX, y - discHalfHeight);
+  ctx.ellipse(rightX, y, discHalfWidth, discHalfHeight, 0, -Math.PI / 2, Math.PI / 2);
+  ctx.lineTo(leftX, y + discHalfHeight);
+  ctx.ellipse(leftX, y, discHalfWidth, discHalfHeight, 0, Math.PI / 2, -Math.PI / 2);
+  ctx.closePath();
   ctx.fill();
   ctx.stroke();
 
   ctx.beginPath();
-  ctx.ellipse(x, y, radius, radius * 0.4, 0, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.ellipse(leftX, y, discHalfWidth, discHalfHeight, 0, 0, Math.PI * 2);
   ctx.stroke();
 
   ctx.beginPath();
-  ctx.moveTo(x - radius, y);
-  ctx.lineTo(x - radius, y - height);
-  ctx.moveTo(x + radius, y);
-  ctx.lineTo(x + radius, y - height);
+  ctx.ellipse(rightX, y, discHalfWidth, discHalfHeight, 0, 0, Math.PI * 2);
   ctx.stroke();
 }
 
@@ -1196,7 +1203,9 @@ export function drawIsometricScene(ctx, canvas, params, state, selectedObject = 
     return { ...node, projected: point, layerDepth };
   });
 
-  const bounds = projected.reduce((acc, node) => {
+  const framingNodes = projected.filter((node) => node.kind === "gear");
+  const boundsSource = framingNodes.length > 0 ? framingNodes : projected;
+  const bounds = boundsSource.reduce((acc, node) => {
     acc.minX = Math.min(acc.minX, node.projected.x);
     acc.maxX = Math.max(acc.maxX, node.projected.x);
     acc.minY = Math.min(acc.minY, node.projected.y);
@@ -1221,7 +1230,7 @@ export function drawIsometricScene(ctx, canvas, params, state, selectedObject = 
     const stroke = isSelected ? "#f59e0b" : "#1f2937";
 
     if (node.kind === "gear") {
-      drawIsoDisc(ctx, x, y, Math.max(7, node.radius * scale * 0.55), 12, node.rigidWith ? "#fde68a" : (node.role === "driver" ? "#99f6e4" : "#bfdbfe"), stroke);
+      drawIsoDisc(ctx, x, y, Math.max(7, node.radius * scale * 0.52), 7, node.rigidWith ? "#fde68a" : (node.role === "driver" ? "#99f6e4" : "#bfdbfe"), stroke);
       return;
     }
 

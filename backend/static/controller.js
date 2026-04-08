@@ -416,6 +416,7 @@ export function bootstrap() {
   let didPanDrag = false;
   let spacePressed = false;
   let selectedNodeEditorSignature = "";
+  let layerListSignature = "";
 
   function makeNode(id, label, children = []) {
     return { id, label, children };
@@ -478,6 +479,25 @@ export function bootstrap() {
 
   function isLayerVisible(layerId) {
     return getSceneLayer(simulation.sceneGraph, layerId)?.visible !== false;
+  }
+
+  function updateSceneLayerById(layerId, update) {
+    let didUpdate = false;
+    simulation.sceneGraph.layers = getSceneLayers().map((layer, index) => {
+      if (layer.id !== layerId) {
+        return sanitizeLayer(layer, index);
+      }
+
+      didUpdate = true;
+      const nextLayer = typeof update === "function" ? update(layer) : { ...layer, ...update };
+      return sanitizeLayer(nextLayer, index);
+    });
+
+    if (didUpdate) {
+      layerListSignature = "";
+    }
+
+    return didUpdate;
   }
 
   function ensureValidSceneLayers() {
@@ -1202,6 +1222,13 @@ export function bootstrap() {
       return;
     }
     const layerId = getNodeLayerId(simulation.sceneGraph, selectedNode?.id ?? relationTarget.id);
+    if (!isLayerVisible(layerId) || isLayerLocked(layerId)) {
+      setStatusMessage("Cannot create a gear on a hidden or locked layer.", {
+        debug: `add_gear blocked on layer=${layerId}.`,
+        level: "warn",
+      });
+      return;
+    }
     const shouldMesh = Boolean(relationTarget);
     const meshCenterFromDirection = shouldMesh ? resolvePlacementCenterFromDirection(relationTarget, radius, slot) : null;
     const center = meshCenterFromDirection
@@ -1260,6 +1287,13 @@ export function bootstrap() {
       return;
     }
     const layerId = getNodeLayerId(simulation.sceneGraph, inputGear.id);
+    if (!isLayerVisible(layerId) || isLayerLocked(layerId)) {
+      setStatusMessage("Cannot create a linkage on a hidden or locked layer.", {
+        debug: `add_linkage blocked on layer=${layerId}.`,
+        level: "warn",
+      });
+      return;
+    }
 
     const linkageIndex = getNextDynamicNodeIndex(
       "linkage",
@@ -1359,6 +1393,14 @@ export function bootstrap() {
       });
       return;
     }
+    const layerId = getNodeLayerId(simulation.sceneGraph, selectedNode.id);
+    if (!isLayerVisible(layerId) || isLayerLocked(layerId)) {
+      setStatusMessage("Cannot create a joint on a hidden or locked layer.", {
+        debug: `add_joint blocked on layer=${layerId}.`,
+        level: "warn",
+      });
+      return;
+    }
     const index = getNextDynamicNodeIndex(
       "joint",
       Object.values(simulation.sceneGraph.nodeRegistry ?? {}).filter((node) => /^joint-\d+$/.test(node?.id ?? "")),
@@ -1381,7 +1423,7 @@ export function bootstrap() {
       id,
       label: `Joint${index}`,
       type: "joint-anchor",
-      layerId: getNodeLayerId(simulation.sceneGraph, selectedNode.id),
+      layerId,
       parentId: attachmentTargetId,
       attachmentTargetId,
     }, { id, label: `Joint${index}`, type: "joint-anchor" });
@@ -2075,8 +2117,22 @@ export function bootstrap() {
       return;
     }
 
-    controls.layer_list.innerHTML = "";
     const activeLayerId = getActiveLayerId();
+    const nextSignature = JSON.stringify({
+      activeLayerId,
+      layers: getSceneLayers().map((layer) => ({
+        id: layer.id,
+        label: layer.label,
+        visible: layer.visible !== false,
+        locked: layer.locked === true,
+      })),
+    });
+    if (nextSignature === layerListSignature) {
+      return;
+    }
+    layerListSignature = nextSignature;
+
+    controls.layer_list.innerHTML = "";
     getSceneLayers().forEach((layer) => {
       const item = document.createElement("li");
       item.className = "layer-list__item";
@@ -2107,7 +2163,10 @@ export function bootstrap() {
       rename.type = "text";
       rename.value = layer.label;
       rename.addEventListener("change", () => {
-        layer.label = rename.value.trim() || layer.id;
+        updateSceneLayerById(layer.id, (currentLayer) => ({
+          ...currentLayer,
+          label: rename.value.trim() || currentLayer.id,
+        }));
         simulation.sceneTreeDirty = true;
         renderScene();
       });
@@ -2119,7 +2178,10 @@ export function bootstrap() {
       visibilityButton.type = "button";
       visibilityButton.textContent = layer.visible ? "Hide" : "Show";
       visibilityButton.addEventListener("click", () => {
-        layer.visible = !layer.visible;
+        updateSceneLayerById(layer.id, (currentLayer) => ({
+          ...currentLayer,
+          visible: currentLayer.visible === false,
+        }));
         if (isSelectedLayerBlocked()) {
           selectObjectById(null);
         }
@@ -2131,7 +2193,10 @@ export function bootstrap() {
       lockButton.type = "button";
       lockButton.textContent = layer.locked ? "Unlock" : "Lock";
       lockButton.addEventListener("click", () => {
-        layer.locked = !layer.locked;
+        updateSceneLayerById(layer.id, (currentLayer) => ({
+          ...currentLayer,
+          locked: currentLayer.locked !== true,
+        }));
         if (isSelectedLayerBlocked()) {
           selectObjectById(null);
         }
@@ -2509,6 +2574,17 @@ export function bootstrap() {
   }
 
   function renderScene() {
+    if (!simulation.params.scene_graph) {
+      simulation.params.scene_graph = {};
+    }
+    simulation.params.scene_graph.layers = simulation.sceneGraph.layers;
+    simulation.params.scene_graph.nodeRegistry = simulation.sceneGraph.nodeRegistry;
+    simulation.params.scene_graph.linkageGroups = simulation.sceneGraph.linkageGroups;
+    simulation.params.scene_graph.parentChildEdges = simulation.sceneGraph.parentChildEdges;
+    simulation.params.scene_graph.rootNodeId = simulation.sceneGraph.rootNodeId;
+    simulation.params.scene_graph.genesisNodeId = simulation.sceneGraph.genesisNodeId;
+    simulation.params.scene_graph.genesisPolicy = simulation.sceneGraph.genesisPolicy;
+
     const state = computeState(simulation.params, simulation.timeSeconds);
 
     simulation.hitRegions = drawScene(
