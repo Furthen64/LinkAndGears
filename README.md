@@ -62,3 +62,18 @@ Scene templates are JSON files located in `backend/static/templates/`. These tem
 - Component sizes
 
 The default template is `default-scene.json`, but you can create and load custom templates.
+
+## Debug Globals (Optional)
+
+The app no longer always exposes `LinkAndGearsApp`, `LinkAndGearsController`,
+`LinkAndGearsKinematics`, and `LinkAndGearsRenderer` on `globalThis`.
+Those globals are **only** exposed when an explicit debug flag is enabled.
+
+You can enable debug globals in either of these ways:
+
+- URL param: open the app with `?debug_globals=1` (also accepts `true`, `yes`, or `on`)
+- Pre-bootstrap global flag:
+  `window.__LINK_AND_GEARS_DEBUG_GLOBALS__ = true`
+
+This keeps the default runtime clean for embedding while still allowing
+browser-console debugging when intentionally enabled.
