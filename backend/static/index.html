@@ -45,7 +45,15 @@
           <p class="viewer-top-controls__help">Selecting a preset updates mechanism inputs.</p>
         </div>
         <canvas id="mechanism-canvas" width="760" height="460" aria-label="Gear and slider mechanism"></canvas>
-        <p class="selection-tip">Tip: click motor, gear, linkage, slider, or rail to inspect details.</p>
+        <div id="gear-slot-menu" class="gear-slot-menu" hidden aria-label="Placement actions">
+          <div class="gear-slot-menu__title">Placement actions</div>
+          <div class="gear-slot-menu__actions">
+            <button id="gear-slot-menu-add-gear" type="button">Add gear</button>
+            <button id="gear-slot-menu-add-linkage" type="button">Add linkage</button>
+            <button id="gear-slot-menu-add-joint" type="button">Add joint</button>
+          </div>
+        </div>
+        <p class="selection-tip">Tip: click a selected gear's small circles to open the add menu.</p>
         <p class="camera-tip">Wheel: zoom • Middle-drag or Space+drag: pan • Reset View: restore.</p>
 
         <section class="selection-panel" aria-live="polite">

@@ -206,6 +206,10 @@ function getControls() {
     add_gear: document.getElementById("add-gear"),
     add_linkage: document.getElementById("add-linkage"),
     add_joint: document.getElementById("add-joint"),
+    gear_slot_menu: document.getElementById("gear-slot-menu"),
+    gear_slot_menu_add_gear: document.getElementById("gear-slot-menu-add-gear"),
+    gear_slot_menu_add_linkage: document.getElementById("gear-slot-menu-add-linkage"),
+    gear_slot_menu_add_joint: document.getElementById("gear-slot-menu-add-joint"),
     delete_selected: document.getElementById("delete-selected"),
     status_debug: document.getElementById("status-debug"),
     selected_node_properties: document.getElementById("selected-node-properties"),
@@ -849,6 +853,10 @@ export function bootstrap() {
       linkageNode.attachmentTargetId = inputGearId;
     }
 
+    relayoutLinkageGroup(linkageGroup);
+    rebuildNodeRegistry();
+    syncLegacySceneStoresFromRegistry();
+
     simulation.sceneTreeDirty = true;
 
     return true;
@@ -902,6 +910,72 @@ export function bootstrap() {
 
   function clearPendingGearSlot() {
     simulation.pendingGearSlot = null;
+    if (controls.gear_slot_menu) {
+      controls.gear_slot_menu.hidden = true;
+      controls.gear_slot_menu.style.visibility = "";
+      controls.gear_slot_menu.style.left = "";
+      controls.gear_slot_menu.style.top = "";
+      controls.gear_slot_menu.dataset.arrowX = "";
+      controls.gear_slot_menu.dataset.arrowY = "";
+    }
+  }
+
+  function updateGearSlotMenu() {
+    const menu = controls.gear_slot_menu;
+    const slot = simulation.pendingGearSlot;
+    if (!menu || !canvas) {
+      return;
+    }
+
+    if (!slot) {
+      menu.hidden = true;
+      menu.style.visibility = "";
+      menu.style.left = "";
+      menu.style.top = "";
+      menu.dataset.arrowX = "";
+      menu.dataset.arrowY = "";
+      return;
+    }
+
+    const transform = createTransform(canvas, simulation.params, simulation.camera);
+    const canvasPoint = transform.toCanvas(slot.center);
+    const canvasRect = canvas.getBoundingClientRect();
+    const scaleX = canvasRect.width / canvas.width;
+    const scaleY = canvasRect.height / canvas.height;
+    const anchorX = canvasRect.left + canvasPoint.x * scaleX;
+    const anchorY = canvasRect.top + canvasPoint.y * scaleY;
+    const offset = 12;
+    const padding = 8;
+
+    menu.hidden = false;
+    menu.style.visibility = "hidden";
+    menu.style.left = `${Math.round(anchorX + offset)}px`;
+    menu.style.top = `${Math.round(anchorY + offset)}px`;
+
+    const menuRect = menu.getBoundingClientRect();
+    let left = anchorX + offset;
+    let top = anchorY + offset;
+
+    let isFlippedX = false;
+    let isFlippedY = false;
+
+    if (left + menuRect.width > window.innerWidth - padding) {
+      left = anchorX - menuRect.width - offset;
+      isFlippedX = true;
+    }
+    if (top + menuRect.height > window.innerHeight - padding) {
+      top = anchorY - menuRect.height - offset;
+      isFlippedY = true;
+    }
+
+    left = Math.min(Math.max(left, padding), Math.max(padding, window.innerWidth - menuRect.width - padding));
+    top = Math.min(Math.max(top, padding), Math.max(padding, window.innerHeight - menuRect.height - padding));
+
+    menu.dataset.arrowX = isFlippedX ? "right" : "left";
+    menu.dataset.arrowY = isFlippedY ? "bottom" : "top";
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+    menu.style.visibility = "visible";
   }
 
   function getPlacementSlotFromHitRegion(region) {
@@ -950,6 +1024,238 @@ export function bootstrap() {
       x: anchorGear.center.x + unitX * centerDistance,
       y: anchorGear.center.y + unitY * centerDistance,
     };
+  }
+
+  function relayoutLinkageGroup(linkageGroup) {
+    if (!linkageGroup) {
+      return false;
+    }
+
+    const registry = simulation.sceneGraph.nodeRegistry ?? {};
+    const groundNode = registry[linkageGroup.groundNodeId] ?? null;
+    const linkageNode = registry[linkageGroup.linkageNodeId] ?? null;
+    const inputGear = getGearLookup()[linkageGroup.inputGearId] ?? registry[linkageGroup.inputGearId] ?? null;
+    if (!groundNode || !inputGear) {
+      return false;
+    }
+
+    const inputCenterX = Number.isFinite(Number(inputGear.center?.x)) ? Number(inputGear.center.x) : 0;
+    const inputCenterY = Number.isFinite(Number(inputGear.center?.y)) ? Number(inputGear.center.y) : 0;
+    const inputRadius = toPositiveFinite(Number(inputGear.radius), 0.1);
+    const reach = Math.max(getLinkageGroupParamValue(linkageGroup, "rodLength"), inputRadius * 3);
+    const sliderAxis = getLinkageGroupParamValue(linkageGroup, "sliderAxis");
+    const sliderOffset = getLinkageGroupParamValue(linkageGroup, "sliderOffset");
+
+    groundNode.center = sliderAxis === "vertical"
+      ? { x: sliderOffset, y: inputCenterY + reach }
+      : { x: inputCenterX + reach, y: sliderOffset };
+    groundNode.parentId = linkageNode?.id ?? groundNode.parentId ?? null;
+    groundNode.attachmentTargetId = linkageNode?.id ?? groundNode.attachmentTargetId ?? null;
+
+    return true;
+  }
+
+  function addGearFromCurrentSelection() {
+    syncParamsFromControls();
+    const index = getNextDynamicNodeIndex(
+      "gear",
+      Object.values(simulation.sceneGraph.nodeRegistry ?? {}).filter((node) => /^gear-\d+$/.test(node?.id ?? "")),
+    );
+    const id = `gear-${index}`;
+    const canonicalModule = getSceneModule();
+    const gearLookup = getGearLookup();
+    const primaryDrivenGear = gearLookup[getPrimaryDrivenGearId()] ?? null;
+    const canonicalDrivenTeeth = Math.max(
+      1,
+      Math.round(toPositiveFinite(Number(primaryDrivenGear?.teeth ?? simulation.params.driven_teeth), 24)),
+    );
+    const radius = (canonicalModule * canonicalDrivenTeeth) / 2;
+    const selectedIsGear = typeof simulation.selectedObjectId === "string" && isGearNodeId(simulation.selectedObjectId);
+
+    const slot = simulation.pendingGearSlot;
+    const selectedGearFromSlot = typeof slot?.sourceGearId === "string" ? gearLookup[slot.sourceGearId] : null;
+    const selectedGearFromSelection = selectedIsGear ? gearLookup[simulation.selectedObjectId] : null;
+    const relationTarget = selectedGearFromSlot ?? selectedGearFromSelection ?? gearLookup[getRootNodeId()];
+    if (!relationTarget?.id || !gearLookup[relationTarget.id]) {
+      setStatusMessage("Unable to add gear: no valid attachment target selected.", {
+        debug: `add_gear aborted; target=${relationTarget?.id ?? "none"}, root=${simulation.sceneGraph.rootNodeId}.`,
+        level: "warn",
+      });
+      return;
+    }
+    const shouldMesh = Boolean(relationTarget);
+    const meshCenterFromDirection = shouldMesh ? resolvePlacementCenterFromDirection(relationTarget, radius, slot) : null;
+    const center = meshCenterFromDirection
+      ? meshCenterFromDirection
+      : shouldMesh
+        ? {
+            x: relationTarget.center.x + relationTarget.radius + radius,
+            y: relationTarget.center.y,
+          }
+        : {
+            x: relationTarget.center.x,
+            y: relationTarget.center.y,
+          };
+
+    simulation.sceneGraph.nodeRegistry[id] = sanitizeRegistryNode({
+      id,
+      label: `Gear${index}`,
+      type: "gear",
+      parentId: relationTarget.id,
+      meshWith: shouldMesh ? relationTarget.id : null,
+      module: canonicalModule,
+      teeth: canonicalDrivenTeeth,
+      radiusMode: "moduleTeeth",
+      radius,
+      attachmentTargetId: relationTarget.id,
+      centerMode: shouldMesh ? "manual" : "parent",
+      center,
+      linkageAnchor: null,
+      showIndicator: false,
+    }, { id, label: `Gear${index}`, type: "gear" });
+    rebuildNodeRegistry();
+    syncParamsFromControls();
+    simulation.sceneTreeDirty = true;
+    clearPendingGearSlot();
+    selectObjectById(id);
+  }
+
+  function addLinkageFromCurrentSelection() {
+    syncParamsFromControls();
+
+    const registry = simulation.sceneGraph.nodeRegistry ?? {};
+    const gearLookup = getGearLookup();
+    const selectedGear = isGearNodeId(simulation.selectedObjectId)
+      ? gearLookup[simulation.selectedObjectId]
+      : null;
+    const inputGear = selectedGear
+      ?? gearLookup[getPrimaryDrivenGearId()]
+      ?? gearLookup[getRootNodeId()]
+      ?? null;
+
+    if (!inputGear) {
+      setStatusMessage("Unable to add linkage: no motor or gear node is available.", {
+        debug: "add_linkage aborted because no valid input gear was resolved.",
+        level: "warn",
+      });
+      return;
+    }
+
+    const linkageIndex = getNextDynamicNodeIndex(
+      "linkage",
+      Object.values(registry).filter((node) => /^linkage-\d+$/.test(node?.id ?? "")),
+    );
+    const sliderIndex = getNextDynamicNodeIndex(
+      "slider",
+      Object.values(registry).filter((node) => /^slider-\d+$/.test(node?.id ?? "")),
+    );
+    const groundIndex = getNextDynamicNodeIndex(
+      "ground",
+      Object.values(registry).filter((node) => /^ground-\d+$/.test(node?.id ?? "")),
+    );
+    const groupIndex = getNextDynamicNodeIndex("linkage-group", getResolvedLinkageGroups());
+
+    const linkageId = `linkage-${linkageIndex}`;
+    const sliderId = `slider-${sliderIndex}`;
+    const groundId = `ground-${groundIndex}`;
+    const groupId = `linkage-group-${groupIndex}`;
+
+    const activeLinkageGroup = getActiveLinkageGroup();
+    const defaultCrankRadius = activeLinkageGroup
+      ? getLinkageGroupParamValue(activeLinkageGroup, "crankRadius")
+      : Math.max(0.4, Number(inputGear.radius) * 0.75);
+    const defaultRodLength = activeLinkageGroup
+      ? Math.max(getLinkageGroupParamValue(activeLinkageGroup, "rodLength"), defaultCrankRadius)
+      : defaultCrankRadius + Math.max(1, defaultCrankRadius);
+    const inputGearCenterX = Number.isFinite(Number(inputGear.center?.x)) ? Number(inputGear.center.x) : 0;
+    const inputGearCenterY = Number.isFinite(Number(inputGear.center?.y)) ? Number(inputGear.center.y) : 0;
+    const defaultSliderOffset = inputGearCenterY;
+    const groundX = inputGearCenterX + Math.max(defaultRodLength, Number(inputGear.radius) * 3);
+
+    simulation.sceneGraph.nodeRegistry[linkageId] = sanitizeRegistryNode({
+      id: linkageId,
+      label: `Linkage${linkageIndex}`,
+      type: "linkage-anchor",
+      role: "linkage-anchor",
+      parentId: inputGear.id,
+      attachmentTargetId: inputGear.id,
+    }, { id: linkageId, label: `Linkage${linkageIndex}`, type: "linkage-anchor" });
+
+    simulation.sceneGraph.nodeRegistry[sliderId] = sanitizeRegistryNode({
+      id: sliderId,
+      label: `Slider${sliderIndex}`,
+      type: "slider",
+      role: "slider-carriage",
+      parentId: linkageId,
+      attachmentTargetId: linkageId,
+    }, { id: sliderId, label: `Slider${sliderIndex}`, type: "slider" });
+
+    simulation.sceneGraph.nodeRegistry[groundId] = sanitizeRegistryNode({
+      id: groundId,
+      label: `Ground${groundIndex}`,
+      type: "ground-anchor",
+      role: "ground-reference",
+      parentId: linkageId,
+      attachmentTargetId: linkageId,
+      center: { x: groundX, y: defaultSliderOffset },
+    }, { id: groundId, label: `Ground${groundIndex}`, type: "ground-anchor" });
+
+    simulation.sceneGraph.linkageGroups = [
+      ...getResolvedLinkageGroups(),
+      {
+        id: groupId,
+        label: `Linkage ${groupIndex}`,
+        type: "slider-crank",
+        inputGearId: inputGear.id,
+        linkageNodeId: linkageId,
+        sliderNodeId: sliderId,
+        groundNodeId: groundId,
+        crankRadius: defaultCrankRadius,
+        rodLength: defaultRodLength,
+        sliderAxis: "horizontal",
+        sliderOffset: defaultSliderOffset,
+      },
+    ];
+
+    rebuildNodeRegistry();
+    syncParamsFromControls();
+    simulation.sceneTreeDirty = true;
+    selectObjectById(linkageId);
+    setStatusMessage("Added linkage group.", {
+      debug: `add_linkage created ${groupId} on input gear ${inputGear.id} with horizontal rail at y=${defaultSliderOffset}.`,
+    });
+  }
+
+  function addJointFromCurrentSelection() {
+    const index = getNextDynamicNodeIndex(
+      "joint",
+      Object.values(simulation.sceneGraph.nodeRegistry ?? {}).filter((node) => /^joint-\d+$/.test(node?.id ?? "")),
+    );
+    const id = `joint-${index}`;
+    const primaryLinkageGroup = getPrimaryLinkageGroup();
+    const attachmentTargetId = simulation.sceneGraph.nodeRegistry?.[simulation.selectedObjectId]
+      ? simulation.selectedObjectId
+      : (primaryLinkageGroup?.linkageNodeId && simulation.sceneGraph.nodeRegistry?.[primaryLinkageGroup.linkageNodeId]
+        ? primaryLinkageGroup.linkageNodeId
+        : getRootNodeId());
+    if (!simulation.sceneGraph.nodeRegistry?.[attachmentTargetId]) {
+      setStatusMessage("Unable to add joint: no valid attachment target found.", {
+        debug: `add_joint aborted; target=${attachmentTargetId}.`,
+        level: "warn",
+      });
+      return;
+    }
+    simulation.sceneGraph.nodeRegistry[id] = sanitizeRegistryNode({
+      id,
+      label: `Joint${index}`,
+      type: "joint-anchor",
+      parentId: attachmentTargetId,
+      attachmentTargetId,
+    }, { id, label: `Joint${index}`, type: "joint-anchor" });
+    rebuildNodeRegistry();
+    syncParamsFromControls();
+    simulation.sceneTreeDirty = true;
+    selectObjectById(id);
   }
 
   function getGearLookup() {
@@ -1711,6 +2017,9 @@ export function bootstrap() {
     if (key === "slider_axis") {
       if (linkageGroup) {
         linkageGroup.sliderAxis = normalizeSliderAxisValue(rawValue);
+        relayoutLinkageGroup(linkageGroup);
+        rebuildNodeRegistry();
+        syncLegacySceneStoresFromRegistry();
         syncLinkageControlsFromGroup(linkageGroup);
       }
       syncParamsFromControls();
@@ -1723,6 +2032,9 @@ export function bootstrap() {
         linkageGroup.sliderOffset = Number.isFinite(Number(rawValue))
           ? Number(rawValue)
           : getLinkageGroupParamValue(linkageGroup, "sliderOffset");
+        relayoutLinkageGroup(linkageGroup);
+        rebuildNodeRegistry();
+        syncLegacySceneStoresFromRegistry();
         syncLinkageControlsFromGroup(linkageGroup);
       }
       syncParamsFromControls();
@@ -1877,6 +2189,7 @@ export function bootstrap() {
     );
 
     updateSelectionPanel(state);
+    updateGearSlotMenu();
 
     if (simulation.normalizationError) {
       setStatusMessage(`Invalid parameters: ${simulation.normalizationError}`, {
@@ -2292,208 +2605,27 @@ export function bootstrap() {
   });
 
   controls.add_gear?.addEventListener("click", () => {
-    syncParamsFromControls();
-    const index = getNextDynamicNodeIndex(
-      "gear",
-      Object.values(simulation.sceneGraph.nodeRegistry ?? {}).filter((node) => /^gear-\d+$/.test(node?.id ?? "")),
-    );
-    const id = `gear-${index}`;
-    const canonicalModule = getSceneModule();
-    const gearLookup = getGearLookup();
-    const primaryDrivenGear = gearLookup[getPrimaryDrivenGearId()] ?? null;
-    const canonicalDrivenTeeth = Math.max(
-      1,
-      Math.round(toPositiveFinite(Number(primaryDrivenGear?.teeth ?? simulation.params.driven_teeth), 24)),
-    );
-    const radius = (canonicalModule * canonicalDrivenTeeth) / 2;
-    const selectedIsGear = typeof simulation.selectedObjectId === "string" && isGearNodeId(simulation.selectedObjectId);
+    addGearFromCurrentSelection();
+  });
 
-    const slot = simulation.pendingGearSlot;
-    const selectedGearFromSlot = typeof slot?.sourceGearId === "string" ? gearLookup[slot.sourceGearId] : null;
-    const selectedGearFromSelection = selectedIsGear ? gearLookup[simulation.selectedObjectId] : null;
-    const relationTarget = selectedGearFromSlot ?? selectedGearFromSelection ?? gearLookup[getRootNodeId()];
-    if (!relationTarget?.id || !gearLookup[relationTarget.id]) {
-      setStatusMessage("Unable to add gear: no valid attachment target selected.", {
-        debug: `add_gear aborted; target=${relationTarget?.id ?? "none"}, root=${simulation.sceneGraph.rootNodeId}.`,
-        level: "warn",
-      });
-      return;
-    }
-    const shouldMesh = Boolean(relationTarget);
-    const meshCenterFromDirection = shouldMesh ? resolvePlacementCenterFromDirection(relationTarget, radius, slot) : null;
-    const center = meshCenterFromDirection
-      ? meshCenterFromDirection
-      : shouldMesh
-        ? {
-            x: relationTarget.center.x + relationTarget.radius + radius,
-            y: relationTarget.center.y,
-          }
-        : {
-            x: relationTarget.center.x,
-            y: relationTarget.center.y,
-          };
-
-    simulation.sceneGraph.nodeRegistry[id] = sanitizeRegistryNode({
-      id,
-      label: `Gear${index}`,
-      type: "gear",
-      parentId: relationTarget.id,
-      meshWith: shouldMesh ? relationTarget.id : null,
-      module: canonicalModule,
-      teeth: canonicalDrivenTeeth,
-      radiusMode: "moduleTeeth",
-      radius,
-      attachmentTargetId: relationTarget.id,
-      centerMode: shouldMesh ? "manual" : "parent",
-      center,
-      linkageAnchor: null,
-      showIndicator: false,
-    }, { id, label: `Gear${index}`, type: "gear" });
-    rebuildNodeRegistry();
-    syncParamsFromControls();
-    simulation.sceneTreeDirty = true;
-    clearPendingGearSlot();
-    selectObjectById(id);
+  controls.gear_slot_menu_add_gear?.addEventListener("click", () => {
+    addGearFromCurrentSelection();
   });
 
   controls.add_linkage?.addEventListener("click", () => {
-    syncParamsFromControls();
+    addLinkageFromCurrentSelection();
+  });
 
-    const registry = simulation.sceneGraph.nodeRegistry ?? {};
-    const gearLookup = getGearLookup();
-    const selectedGear = isGearNodeId(simulation.selectedObjectId)
-      ? gearLookup[simulation.selectedObjectId]
-      : null;
-    const inputGear = selectedGear
-      ?? gearLookup[getPrimaryDrivenGearId()]
-      ?? gearLookup[getRootNodeId()]
-      ?? null;
-
-    if (!inputGear) {
-      setStatusMessage("Unable to add linkage: no motor or gear node is available.", {
-        debug: "add_linkage aborted because no valid input gear was resolved.",
-        level: "warn",
-      });
-      return;
-    }
-
-    const linkageIndex = getNextDynamicNodeIndex(
-      "linkage",
-      Object.values(registry).filter((node) => /^linkage-\d+$/.test(node?.id ?? "")),
-    );
-    const sliderIndex = getNextDynamicNodeIndex(
-      "slider",
-      Object.values(registry).filter((node) => /^slider-\d+$/.test(node?.id ?? "")),
-    );
-    const groundIndex = getNextDynamicNodeIndex(
-      "ground",
-      Object.values(registry).filter((node) => /^ground-\d+$/.test(node?.id ?? "")),
-    );
-    const groupIndex = getNextDynamicNodeIndex("linkage-group", getResolvedLinkageGroups());
-
-    const linkageId = `linkage-${linkageIndex}`;
-    const sliderId = `slider-${sliderIndex}`;
-    const groundId = `ground-${groundIndex}`;
-    const groupId = `linkage-group-${groupIndex}`;
-
-    const activeLinkageGroup = getActiveLinkageGroup();
-    const defaultCrankRadius = activeLinkageGroup
-      ? getLinkageGroupParamValue(activeLinkageGroup, "crankRadius")
-      : Math.max(0.4, Number(inputGear.radius) * 0.75);
-    const defaultRodLength = activeLinkageGroup
-      ? Math.max(getLinkageGroupParamValue(activeLinkageGroup, "rodLength"), defaultCrankRadius)
-      : defaultCrankRadius + Math.max(1, defaultCrankRadius);
-    const defaultSliderOffset = activeLinkageGroup
-      ? getLinkageGroupParamValue(activeLinkageGroup, "sliderOffset")
-      : (Number.isFinite(Number(inputGear.center?.y)) ? Number(inputGear.center.y) : 0);
-    const groundX = Number.isFinite(Number(inputGear.center?.x))
-      ? Number(inputGear.center.x) + Math.max(defaultRodLength, Number(inputGear.radius) * 3)
-      : Math.max(defaultRodLength, Number(inputGear.radius) * 3);
-
-    simulation.sceneGraph.nodeRegistry[linkageId] = sanitizeRegistryNode({
-      id: linkageId,
-      label: `Linkage${linkageIndex}`,
-      type: "linkage-anchor",
-      role: "linkage-anchor",
-      parentId: inputGear.id,
-      attachmentTargetId: inputGear.id,
-    }, { id: linkageId, label: `Linkage${linkageIndex}`, type: "linkage-anchor" });
-
-    simulation.sceneGraph.nodeRegistry[sliderId] = sanitizeRegistryNode({
-      id: sliderId,
-      label: `Slider${sliderIndex}`,
-      type: "slider",
-      role: "slider-carriage",
-      parentId: linkageId,
-      attachmentTargetId: linkageId,
-    }, { id: sliderId, label: `Slider${sliderIndex}`, type: "slider" });
-
-    simulation.sceneGraph.nodeRegistry[groundId] = sanitizeRegistryNode({
-      id: groundId,
-      label: `Ground${groundIndex}`,
-      type: "ground-anchor",
-      role: "ground-reference",
-      parentId: linkageId,
-      attachmentTargetId: linkageId,
-      center: { x: groundX, y: defaultSliderOffset },
-    }, { id: groundId, label: `Ground${groundIndex}`, type: "ground-anchor" });
-
-    simulation.sceneGraph.linkageGroups = [
-      ...getResolvedLinkageGroups(),
-      {
-        id: groupId,
-        label: `Linkage ${groupIndex}`,
-        type: "slider-crank",
-        inputGearId: inputGear.id,
-        linkageNodeId: linkageId,
-        sliderNodeId: sliderId,
-        groundNodeId: groundId,
-        crankRadius: defaultCrankRadius,
-        rodLength: defaultRodLength,
-        sliderAxis: "horizontal",
-        sliderOffset: defaultSliderOffset,
-      },
-    ];
-
-    rebuildNodeRegistry();
-    syncParamsFromControls();
-    simulation.sceneTreeDirty = true;
-    selectObjectById(linkageId);
-    setStatusMessage("Added linkage group.", {
-      debug: `add_linkage created ${groupId} on input gear ${inputGear.id} with horizontal rail at y=${defaultSliderOffset}.`,
-    });
+  controls.gear_slot_menu_add_linkage?.addEventListener("click", () => {
+    addLinkageFromCurrentSelection();
   });
 
   controls.add_joint?.addEventListener("click", () => {
-    const index = getNextDynamicNodeIndex(
-      "joint",
-      Object.values(simulation.sceneGraph.nodeRegistry ?? {}).filter((node) => /^joint-\d+$/.test(node?.id ?? "")),
-    );
-    const id = `joint-${index}`;
-    const primaryLinkageGroup = getPrimaryLinkageGroup();
-    const attachmentTargetId = simulation.sceneGraph.nodeRegistry?.[simulation.selectedObjectId]
-      ? simulation.selectedObjectId
-      : (primaryLinkageGroup?.linkageNodeId && simulation.sceneGraph.nodeRegistry?.[primaryLinkageGroup.linkageNodeId]
-        ? primaryLinkageGroup.linkageNodeId
-        : getRootNodeId());
-    if (!simulation.sceneGraph.nodeRegistry?.[attachmentTargetId]) {
-      setStatusMessage("Unable to add joint: no valid attachment target found.", {
-        debug: `add_joint aborted; target=${attachmentTargetId}.`,
-        level: "warn",
-      });
-      return;
-    }
-    simulation.sceneGraph.nodeRegistry[id] = sanitizeRegistryNode({
-      id,
-      label: `Joint${index}`,
-      type: "joint-anchor",
-      parentId: attachmentTargetId,
-      attachmentTargetId,
-    }, { id, label: `Joint${index}`, type: "joint-anchor" });
-    rebuildNodeRegistry();
-    syncParamsFromControls();
-    simulation.sceneTreeDirty = true;
-    selectObjectById(id);
+    addJointFromCurrentSelection();
+  });
+
+  controls.gear_slot_menu_add_joint?.addEventListener("click", () => {
+    addJointFromCurrentSelection();
   });
 
   function deleteSelectedNode() {
@@ -2557,7 +2689,7 @@ export function bootstrap() {
 
     if (matchedSlot) {
       simulation.pendingGearSlot = matchedSlot;
-      setStatusMessage("Placement slot selected. Click Add Gear to create the new gear.", {
+      setStatusMessage("Placement slot selected. Choose an action from the popup or toolbar.", {
         debug: `Pending gear slot anchored to ${simulation.pendingGearSlot.anchorId}.`,
       });
       renderScene();
@@ -2654,7 +2786,30 @@ export function bootstrap() {
     if (event.code === "Space") {
       spacePressed = true;
     }
+
+    if (event.code === "Escape") {
+      clearPendingGearSlot();
+      renderScene();
+    }
   });
+
+  document.addEventListener("pointerdown", (event) => {
+    if (!simulation.pendingGearSlot || !controls.gear_slot_menu) {
+      return;
+    }
+
+    const target = event.target;
+    if (!(target instanceof Node)) {
+      return;
+    }
+
+    if (controls.gear_slot_menu.contains(target) || canvas.contains(target)) {
+      return;
+    }
+
+    clearPendingGearSlot();
+    renderScene();
+  }, true);
 
   document.addEventListener("keyup", (event) => {
     if (event.code === "Space") {
@@ -2666,6 +2821,18 @@ export function bootstrap() {
     spacePressed = false;
     stopCameraPan();
   });
+
+  window.addEventListener("resize", () => {
+    if (simulation.pendingGearSlot) {
+      updateGearSlotMenu();
+    }
+  });
+
+  window.addEventListener("scroll", () => {
+    if (simulation.pendingGearSlot) {
+      updateGearSlotMenu();
+    }
+  }, true);
 
   canvas.addEventListener("pointerup", stopCameraPan);
   canvas.addEventListener("pointercancel", stopCameraPan);
