@@ -945,10 +945,29 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
 
       slotRegions.push({
         id: `placement-slot:${key}`,
+        kind: "placement",
         sourceGearId: selectedGear.node.id,
         direction: unitDirection,
         centerWorld,
       });
+    });
+
+    const centerSlotKey = `coaxial:${selectedGear.node.id}`;
+    const isCenterActive = options?.activeGearSlot?.key === centerSlotKey;
+    const centerSlotRadiusPx = 7;
+    ctx.fillStyle = isCenterActive ? "rgba(245, 158, 11, 0.55)" : "rgba(251, 191, 36, 0.34)";
+    ctx.strokeStyle = isCenterActive ? "#fef3c7" : "#f59e0b";
+    ctx.lineWidth = isCenterActive ? 2.5 : 2;
+    ctx.beginPath();
+    ctx.arc(selectedGear.centerCanvas.x, selectedGear.centerCanvas.y, centerSlotRadiusPx, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    slotRegions.push({
+      id: `coaxial-slot:${centerSlotKey}`,
+      kind: "coaxial",
+      sourceGearId: selectedGear.node.id,
+      centerWorld: selectedGear.node.center,
     });
   } else {
     const selectedLinkageGroup = linkageGroups.find((group) => selectedObject === group.linkageNodeId)
@@ -1024,6 +1043,17 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
   const railTolerance = 8;
   const linkageTolerance = 8;
   const hitRegions = [
+    ...slotRegions.map((slotRegion) => ({
+      id: slotRegion.id,
+      sourceGearId: slotRegion.sourceGearId,
+      direction: slotRegion.direction,
+      centerWorld: slotRegion.centerWorld,
+      contains(point) {
+        const slotCanvas = t.toCanvas(slotRegion.centerWorld);
+        const slotRadius = slotRegion.kind === "coaxial" ? 8 : slotRadiusPx + 2;
+        return Math.hypot(point.x - slotCanvas.x, point.y - slotCanvas.y) <= slotRadius;
+      },
+    })),
     ...linkageGroups
       .filter((group) => group.sliderNodeId && Number.isFinite(group.slider?.x) && Number.isFinite(group.slider?.y))
       .map((group) => {
@@ -1054,16 +1084,6 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
         return Math.hypot(point.x - centerCanvas.x, point.y - centerCanvas.y) <= jointRadiusPx + 4;
       },
     })).filter((region) => isNodeSelectable(params.scene_graph ?? {}, { id: region.id })),
-    ...slotRegions.map((slotRegion) => ({
-      id: slotRegion.id,
-      sourceGearId: slotRegion.sourceGearId,
-      direction: slotRegion.direction,
-      centerWorld: slotRegion.centerWorld,
-      contains(point) {
-        const slotCanvas = t.toCanvas(slotRegion.centerWorld);
-        return Math.hypot(point.x - slotCanvas.x, point.y - slotCanvas.y) <= slotRadiusPx + 2;
-      },
-    })),
     ...linkageGroups
       .filter((group) => group.linkageNodeId && group.inputGearNode && Number.isFinite(group.crank?.x) && Number.isFinite(group.crank?.y))
       .map((group) => {
@@ -1183,6 +1203,7 @@ export function drawIsometricScene(ctx, canvas, params, state, selectedObject = 
   const sceneGraph = params.scene_graph ?? {};
   const layers = resolveSceneLayers(sceneGraph);
   const layerIndex = new Map(layers.map((layer, index) => [layer.id, index]));
+  const layerDepthStep = 12;
   const gearNodes = computeGearNodes(params, state);
   const jointNodes = computeJointNodes(params, state, gearNodes);
   const linkageGroups = resolveRuntimeLinkageGroups(params, state, gearNodes);
@@ -1198,7 +1219,7 @@ export function drawIsometricScene(ctx, canvas, params, state, selectedObject = 
   ].filter((node) => isNodeVisible(sceneGraph, node));
 
   const projected = nodes.map((node) => {
-    const layerDepth = (layerIndex.get(node.layerId ?? getNodeLayerId(sceneGraph, node.id)) ?? 0) * 22;
+    const layerDepth = (layerIndex.get(node.layerId ?? getNodeLayerId(sceneGraph, node.id)) ?? 0) * layerDepthStep;
     const point = isoProject(node.center ?? { x: 0, y: 0 }, layerDepth);
     return { ...node, projected: point, layerDepth };
   });
@@ -1223,6 +1244,42 @@ export function drawIsometricScene(ctx, canvas, params, state, selectedObject = 
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   const sorted = projected.sort((a, b) => (a.projected.y - b.projected.y) || (layerIndex.get(a.layerId) ?? 0) - (layerIndex.get(b.layerId) ?? 0));
+  const firstGearByLayer = new Map();
+  sorted.forEach((node) => {
+    if (node.kind !== "gear" || firstGearByLayer.has(node.layerId)) {
+      return;
+    }
+    firstGearByLayer.set(node.layerId, node);
+  });
+
+  ctx.save();
+  ctx.setLineDash([7, 6]);
+  ctx.lineWidth = 1.2;
+  const guideDirection = { x: 1, y: 0.55 };
+  const guideLength = Math.max(canvas.width, canvas.height) * 1.2;
+  const guideMagnitude = Math.hypot(guideDirection.x, guideDirection.y) || 1;
+  const guideUnit = {
+    x: guideDirection.x / guideMagnitude,
+    y: guideDirection.y / guideMagnitude,
+  };
+  firstGearByLayer.forEach((node, layerId) => {
+    const x = node.projected.x * scale + offsetX;
+    const y = node.projected.y * scale + offsetY;
+    const layerOrdinal = layerIndex.get(layerId) ?? 0;
+    ctx.strokeStyle = options.theme === "light"
+      ? `rgba(71, 85, 105, ${Math.max(0.2, 0.42 - layerOrdinal * 0.06)})`
+      : `rgba(148, 163, 184, ${Math.max(0.2, 0.48 - layerOrdinal * 0.06)})`;
+    ctx.beginPath();
+    ctx.moveTo(x - guideUnit.x * guideLength, y - guideUnit.y * guideLength);
+    ctx.lineTo(x + guideUnit.x * guideLength, y + guideUnit.y * guideLength);
+    ctx.stroke();
+
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.font = "12px system-ui, sans-serif";
+    ctx.fillText(layerId, Math.min(canvas.width - 96, x + 12), y - 10);
+  });
+  ctx.restore();
+
   sorted.forEach((node) => {
     const x = node.projected.x * scale + offsetX;
     const y = node.projected.y * scale + offsetY;

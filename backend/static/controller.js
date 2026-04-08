@@ -219,9 +219,11 @@ function getControls() {
     add_linkage: document.getElementById("add-linkage"),
     add_joint: document.getElementById("add-joint"),
     gear_slot_menu: document.getElementById("gear-slot-menu"),
+    gear_slot_menu_title: document.getElementById("gear-slot-menu-title"),
     gear_slot_menu_add_gear: document.getElementById("gear-slot-menu-add-gear"),
     gear_slot_menu_add_linkage: document.getElementById("gear-slot-menu-add-linkage"),
     gear_slot_menu_add_joint: document.getElementById("gear-slot-menu-add-joint"),
+    gear_slot_menu_add_coaxial: document.getElementById("gear-slot-menu-add-coaxial"),
     delete_selected: document.getElementById("delete-selected"),
     isometric_canvas: document.getElementById("isometric-canvas"),
     status_debug: document.getElementById("status-debug"),
@@ -1067,6 +1069,23 @@ export function bootstrap() {
       return;
     }
 
+    const isCoaxialSlot = slot.kind === "coaxial";
+    if (controls.gear_slot_menu_title) {
+      controls.gear_slot_menu_title.textContent = isCoaxialSlot ? "Co-axial actions" : "Placement actions";
+    }
+    if (controls.gear_slot_menu_add_gear) {
+      controls.gear_slot_menu_add_gear.hidden = isCoaxialSlot;
+    }
+    if (controls.gear_slot_menu_add_linkage) {
+      controls.gear_slot_menu_add_linkage.hidden = isCoaxialSlot;
+    }
+    if (controls.gear_slot_menu_add_joint) {
+      controls.gear_slot_menu_add_joint.hidden = isCoaxialSlot;
+    }
+    if (controls.gear_slot_menu_add_coaxial) {
+      controls.gear_slot_menu_add_coaxial.hidden = !isCoaxialSlot;
+    }
+
     const transform = createTransform(canvas, simulation.params, simulation.camera);
     const canvasPoint = transform.toCanvas(slot.center);
     const canvasRect = canvas.getBoundingClientRect();
@@ -1109,7 +1128,25 @@ export function bootstrap() {
   }
 
   function getPlacementSlotFromHitRegion(region) {
-    if (!region || typeof region.id !== "string" || !region.id.startsWith("placement-slot:")) {
+    if (!region || typeof region.id !== "string") {
+      return null;
+    }
+
+    if (region.id.startsWith("coaxial-slot:")) {
+      const center = region.centerWorld;
+      if (!center || !Number.isFinite(center.x) || !Number.isFinite(center.y)) {
+        return null;
+      }
+
+      return {
+        kind: "coaxial",
+        key: region.id.slice("coaxial-slot:".length),
+        sourceGearId: region.sourceGearId,
+        center: { x: center.x, y: center.y },
+      };
+    }
+
+    if (!region.id.startsWith("placement-slot:")) {
       return null;
     }
 
@@ -1119,6 +1156,7 @@ export function bootstrap() {
     }
 
     return {
+      kind: "placement",
       key: region.id.slice("placement-slot:".length),
       sourceGearId: region.sourceGearId,
       direction:
@@ -1154,6 +1192,84 @@ export function bootstrap() {
       x: anchorGear.center.x + unitX * centerDistance,
       y: anchorGear.center.y + unitY * centerDistance,
     };
+  }
+
+  function ensureNextLayerForCoaxial(sourceLayerId) {
+    const existingTarget = getSceneLayers().find((layer) => layer.id !== sourceLayerId && layer.locked !== true) ?? getSceneLayers().find((layer) => layer.id !== sourceLayerId) ?? null;
+    if (existingTarget) {
+      return existingTarget.id;
+    }
+
+    const nextIndex = getSceneLayers().length;
+    const nextLayer = sanitizeLayer({
+      id: `layer-${nextIndex}`,
+      label: `Layer ${nextIndex}`,
+      zIndex: nextIndex,
+      visible: true,
+      locked: false,
+    }, nextIndex);
+    simulation.sceneGraph.layers = [...getSceneLayers(), nextLayer].map((layer, index) => ({ ...layer, zIndex: index }));
+    layerListSignature = "";
+    return nextLayer.id;
+  }
+
+  function addCoaxialGearFromCurrentSelection() {
+    syncParamsFromControls();
+    const slot = simulation.pendingGearSlot;
+    const sourceGearId = typeof slot?.sourceGearId === "string" ? slot.sourceGearId : simulation.selectedObjectId;
+    const sourceGear = getGearLookup()[sourceGearId] ?? null;
+    if (!sourceGear) {
+      setStatusMessage("Select a gear before creating a co-axial gear.", {
+        debug: `add_coaxial blocked; sourceGear=${sourceGearId ?? "none"}.`,
+        level: "warn",
+      });
+      return;
+    }
+
+    const sourceLayerId = getNodeLayerId(simulation.sceneGraph, sourceGear.id);
+    if (isLayerLocked(sourceLayerId)) {
+      setStatusMessage("Cannot create a co-axial gear from a locked layer.", {
+        debug: `add_coaxial blocked on source layer=${sourceLayerId}.`,
+        level: "warn",
+      });
+      return;
+    }
+
+    const targetLayerId = ensureNextLayerForCoaxial(sourceLayerId);
+    const index = getNextDynamicNodeIndex(
+      "gear",
+      Object.values(simulation.sceneGraph.nodeRegistry ?? {}).filter((node) => /^gear-\d+$/.test(node?.id ?? "")),
+    );
+    const id = `gear-${index}`;
+    const moduleValue = getSceneModule();
+    const sourceTeeth = Math.max(1, Math.round(toPositiveFinite(Number(sourceGear.teeth ?? sourceGear.toothCount), 24)));
+    const fallbackTeeth = Math.max(6, Math.round(sourceTeeth * 0.7));
+    const radius = (moduleValue * fallbackTeeth) / 2;
+
+    simulation.sceneGraph.nodeRegistry[id] = sanitizeRegistryNode({
+      id,
+      label: `Gear${index}`,
+      type: "gear",
+      layerId: targetLayerId,
+      parentId: sourceGear.id,
+      attachmentTargetId: sourceGear.id,
+      rigidWith: sourceGear.id,
+      meshWith: null,
+      module: moduleValue,
+      teeth: fallbackTeeth,
+      radiusMode: "moduleTeeth",
+      radius,
+      showIndicator: false,
+    }, { id, label: `Gear${index}`, type: "gear" });
+
+    rebuildNodeRegistry();
+    syncParamsFromControls();
+    simulation.sceneTreeDirty = true;
+    clearPendingGearSlot();
+    selectObjectById(id);
+    setStatusMessage("Created co-axial gear.", {
+      debug: `add_coaxial created ${id} rigidWith=${sourceGear.id} on layer=${targetLayerId}.`,
+    });
   }
 
   function relayoutLinkageGroup(linkageGroup) {
@@ -3065,6 +3181,10 @@ export function bootstrap() {
 
   controls.gear_slot_menu_add_joint?.addEventListener("click", () => {
     addJointFromCurrentSelection();
+  });
+
+  controls.gear_slot_menu_add_coaxial?.addEventListener("click", () => {
+    addCoaxialGearFromCurrentSelection();
   });
 
   function deleteSelectedNode() {
