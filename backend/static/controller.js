@@ -197,6 +197,7 @@ function getControls() {
     workspace_preset: document.getElementById("workspace-preset"),
     new_scene: document.getElementById("new-scene"),
     save_scene_json: document.getElementById("save-scene-json"),
+    load_scene: document.getElementById("load-scene"),
     reset_view: document.getElementById("reset-view"),
     refresh_view: document.getElementById("refresh-view"),
     scene_tree: document.getElementById("scene-tree"),
@@ -2046,6 +2047,94 @@ export function bootstrap() {
     URL.revokeObjectURL(url);
   }
 
+  function readTextFile(file) {
+    if (!file) {
+      return Promise.reject(new Error("No file selected."));
+    }
+
+    if (typeof file.text === "function") {
+      return file.text();
+    }
+
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+      reader.onerror = () => reject(reader.error ?? new Error("Failed to read file."));
+      reader.readAsText(file);
+    });
+  }
+
+  async function importSceneFromFile(file) {
+    const sourceText = await readTextFile(file);
+    let payload;
+
+    try {
+      payload = JSON.parse(sourceText);
+    } catch {
+      throw new Error("Selected file is not valid JSON.");
+    }
+
+    if (!payload || typeof payload !== "object") {
+      throw new Error("Selected file does not contain a scene object.");
+    }
+
+    simulation.timeSeconds = 0;
+    simulation.lastTimestamp = performance.now();
+    applySceneConfig(payload);
+    selectObjectById(getPrimaryDrivenGearId());
+    simulation.sceneTreeDirty = true;
+    clearPendingGearSlot();
+  }
+
+  function promptForSceneFile() {
+    return new Promise((resolve) => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = "application/json,.json";
+      input.hidden = true;
+      let settled = false;
+
+      const cleanup = () => {
+        input.removeEventListener("change", handleChange);
+        input.removeEventListener("cancel", handleCancel);
+        window.removeEventListener("focus", handleWindowFocus);
+        input.remove();
+      };
+
+      const finalize = (file) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        resolve(file ?? null);
+      };
+
+      const handleChange = () => {
+        const [file] = Array.from(input.files ?? []);
+        finalize(file ?? null);
+      };
+
+      const handleCancel = () => {
+        finalize(null);
+      };
+
+      const handleWindowFocus = () => {
+        window.setTimeout(() => {
+          if (!settled && !(input.files?.length > 0)) {
+            finalize(null);
+          }
+        }, 0);
+      };
+
+      input.addEventListener("change", handleChange, { once: true });
+      input.addEventListener("cancel", handleCancel, { once: true });
+      window.addEventListener("focus", handleWindowFocus, { once: true });
+      document.body.appendChild(input);
+      input.click();
+    });
+  }
+
   async function loadNewSceneBaseline() {
     if (typeof fetch !== "function") {
       return NEW_SCENE_FALLBACK;
@@ -2155,6 +2244,26 @@ export function bootstrap() {
     setStatusMessage("Saved scene JSON", {
       debug: "Scene export finished successfully.",
     });
+  });
+
+  controls.load_scene?.addEventListener("click", async () => {
+    try {
+      const file = await promptForSceneFile();
+      if (!file) {
+        return;
+      }
+
+      await importSceneFromFile(file);
+      setStatusMessage(`Loaded scene from ${file.name}.`, {
+        debug: `Scene import finished successfully from ${file.name}.`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to load scene.";
+      setStatusMessage(message, {
+        debug: `Scene import failed: ${message}`,
+        level: "error",
+      });
+    }
   });
 
   controls.reset_view?.addEventListener("click", () => {
