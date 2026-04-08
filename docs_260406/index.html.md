@@ -7,22 +7,12 @@
 That makes this file more than a visual shell. It is effectively the wiring surface between HTML, CSS, and the JavaScript controller.
 
 ## Document Head
-
-### `<!doctype html>` and `<html lang="en">`
-
-Establish standards mode and set the document language for accessibility and browser behavior.
-
-### `<meta charset="UTF-8">`
-
-Ensures text is interpreted as UTF-8.
+ 
 
 ### `<meta name="viewport" ...>`
 
 Makes the layout responsive by matching the viewport width to the device width.
-
-### `<title>LinkAndGears</title>`
-
-Sets the browser tab title.
+ 
 
 ### `<link rel="stylesheet" href="/static/style.css">`
 
@@ -47,7 +37,7 @@ Behavioral role:
 The application is divided into three major regions:
 
 - scene tree panel,
-- viewer panel,
+- viewer panel: The big canvas where all is rendered,
 - controls panel.
 
 This three-column structure mirrors the app architecture:
