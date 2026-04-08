@@ -537,7 +537,6 @@ After helper declaration, `bootstrap` wires the UI.
 - save-scene-json exports the current scene,
 - reset-view restores camera state,
 - refresh-view rebuilds graph state and re-renders,
-- toggle-scene-tree collapses or expands the left panel,
 - add-gear adds a new extra gear using either the selected placement slot or selected gear,
 - add-joint adds a joint attached to the current selection or a fallback node,
 - delete-selected removes the active node when allowed,

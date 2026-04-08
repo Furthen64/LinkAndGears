@@ -55,7 +55,6 @@ Hosts the hierarchical scene editor.
 ### Header
 
 - `<h2>Scene Tree</h2>` labels the region.
-- `<button id="toggle-scene-tree">` collapses or expands the panel.
 
 The button includes:
 

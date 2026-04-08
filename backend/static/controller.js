@@ -202,7 +202,6 @@ function getControls() {
     reset_view: document.getElementById("reset-view"),
     refresh_view: document.getElementById("refresh-view"),
     scene_tree: document.getElementById("scene-tree"),
-    toggle_scene_tree: document.getElementById("toggle-scene-tree"),
     scene_tree_content: document.getElementById("scene-tree-content"),
     add_gear: document.getElementById("add-gear"),
     add_linkage: document.getElementById("add-linkage"),
