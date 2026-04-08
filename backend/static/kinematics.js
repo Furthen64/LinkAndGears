@@ -1,4 +1,5 @@
 import { normalizeNodeRole, normalizeNodeType, resolveLinkageGroups, resolvePrimaryDrivenGearId, resolveSceneRootGearId } from "./scene-graph.js";
+import { shouldExposeDebugGlobals } from "./debug-flags.js";
 
 export const MIN_PRACTICAL_TOOTH_COUNT = 6;
 export const CENTER_DISTANCE_TOLERANCE = 1e-6;
@@ -634,7 +635,7 @@ export function computeState(params, t) {
   return baseState;
 }
 
-if (typeof globalThis !== "undefined") {
+if (typeof globalThis !== "undefined" && shouldExposeDebugGlobals()) {
   globalThis.LinkAndGearsKinematics = {
     computeState,
     computeSceneState,

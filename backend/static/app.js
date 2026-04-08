@@ -1,4 +1,5 @@
 import { bootstrap } from "./controller.js";
+import { shouldExposeDebugGlobals } from "./debug-flags.js";
 
 export const CANONICAL_PARAM_SCHEMA = {
   gear: ["teeth", "radiusMode", "radius", "meshWith", "showIndicator"],
@@ -6,7 +7,7 @@ export const CANONICAL_PARAM_SCHEMA = {
   scene: ["shared-module", "crank_radius", "rod_length", "slider_offset", "slider_axis", "theme-mode"],
 };
 
-if (typeof globalThis !== "undefined") {
+if (typeof globalThis !== "undefined" && shouldExposeDebugGlobals()) {
   globalThis.LinkAndGearsApp = {
     CANONICAL_PARAM_SCHEMA,
   };

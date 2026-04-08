@@ -1,4 +1,5 @@
 import { getSceneNode, resolveLinkageGroups, resolvePrimaryDrivenGearId, resolveSceneRootGearId } from "./scene-graph.js";
+import { shouldExposeDebugGlobals } from "./debug-flags.js";
 
 export function createTransform(canvas, params, camera = {}) {
   const linkageGroups = resolveLinkageGroups(params.scene_graph ?? {});
@@ -1016,6 +1017,6 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
   return hitRegions;
 }
 
-if (typeof globalThis !== "undefined") {
+if (typeof globalThis !== "undefined" && shouldExposeDebugGlobals()) {
   globalThis.LinkAndGearsRenderer = { drawScene, createTransform, objectDetails };
 }

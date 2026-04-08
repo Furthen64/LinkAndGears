@@ -1,6 +1,7 @@
 import { computeState } from "./kinematics.js";
 import { createTransform, drawScene, objectDetails } from "./renderer.js";
 import { buildParentChildEdges, resolveLinkageGroups, sanitizeLinkageGroup } from "./scene-graph.js";
+import { shouldExposeDebugGlobals } from "./debug-flags.js";
 
 export const DEFAULT_SCENE_TEMPLATE = {
   rail: {
@@ -2856,6 +2857,6 @@ export function bootstrap() {
   requestAnimationFrame(renderLoop);
 }
 
-if (typeof globalThis !== "undefined") {
+if (typeof globalThis !== "undefined" && shouldExposeDebugGlobals()) {
   globalThis.LinkAndGearsController = { bootstrap, deepMerge, DEFAULT_SCENE_TEMPLATE };
 }
