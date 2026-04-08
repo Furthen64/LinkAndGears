@@ -249,11 +249,3 @@ export function resolveLinkageGroups(sceneGraph = {}) {
 
   return inferLegacyLinkageGroups(sceneGraph);
 }
-
-export function findFirstNodeByRole(sceneGraph = {}, role) {
-  if (typeof role !== "string" || role.length === 0) {
-    return null;
-  }
-
-  return Object.values(getNodeRegistry(sceneGraph)).find((node) => normalizeNodeRole(node?.role, node?.type) === role) ?? null;
-}
