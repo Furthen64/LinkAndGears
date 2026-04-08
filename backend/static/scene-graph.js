@@ -6,6 +6,51 @@ export function normalizeNodeType(rawType) {
   return rawType.toLowerCase() === "joint-anchor" ? "joint-anchor" : rawType.toLowerCase();
 }
 
+export const DEFAULT_LAYER_ID = "layer-0";
+
+export function sanitizeLayer(rawLayer = {}, fallbackIndex = 0) {
+  const id = typeof rawLayer?.id === "string" && rawLayer.id.trim().length > 0
+    ? rawLayer.id.trim()
+    : `layer-${fallbackIndex}`;
+  const zIndex = Number.isFinite(Number(rawLayer?.zIndex)) ? Number(rawLayer.zIndex) : fallbackIndex;
+
+  return {
+    id,
+    label: typeof rawLayer?.label === "string" && rawLayer.label.trim().length > 0
+      ? rawLayer.label.trim()
+      : `Layer ${fallbackIndex}`,
+    zIndex,
+    visible: rawLayer?.visible !== false,
+    locked: rawLayer?.locked === true,
+  };
+}
+
+export function resolveSceneLayers(sceneGraph = {}) {
+  const rawLayers = Array.isArray(sceneGraph?.layers) ? sceneGraph.layers : [];
+  const sanitized = rawLayers.length > 0
+    ? rawLayers.map((layer, index) => sanitizeLayer(layer, index))
+    : [sanitizeLayer({ id: DEFAULT_LAYER_ID, label: "Layer 0", zIndex: 0, visible: true, locked: false }, 0)];
+  const seenIds = new Set();
+
+  return sanitized
+    .filter((layer) => {
+      if (seenIds.has(layer.id)) {
+        return false;
+      }
+      seenIds.add(layer.id);
+      return true;
+    })
+    .sort((a, b) => a.zIndex - b.zIndex);
+}
+
+export function getSceneLayer(sceneGraph = {}, layerId = DEFAULT_LAYER_ID) {
+  return resolveSceneLayers(sceneGraph).find((layer) => layer.id === layerId) ?? null;
+}
+
+export function getDefaultLayerId(sceneGraph = {}) {
+  return resolveSceneLayers(sceneGraph)[0]?.id ?? DEFAULT_LAYER_ID;
+}
+
 export function normalizeNodeRole(rawRole, rawType = "gear") {
   if (typeof rawRole === "string" && rawRole.trim().length > 0) {
     return rawRole.trim().toLowerCase();
@@ -44,6 +89,30 @@ export function getSceneNode(sceneGraph = {}, nodeId) {
   }
 
   return getNodeRegistry(sceneGraph)[nodeId] ?? null;
+}
+
+export function getNodeLayerId(sceneGraph = {}, nodeId) {
+  const registry = getNodeRegistry(sceneGraph);
+  const node = typeof nodeId === "string" ? registry[nodeId] ?? null : nodeId;
+  if (!node) {
+    return getDefaultLayerId(sceneGraph);
+  }
+
+  const directLayerId = typeof node.layerId === "string" && node.layerId.length > 0 ? node.layerId : null;
+  if (directLayerId && getSceneLayer(sceneGraph, directLayerId)) {
+    return directLayerId;
+  }
+
+  const linkageGroup = resolveLinkageGroups(sceneGraph).find((group) => (
+    group.linkageNodeId === node.id
+    || group.sliderNodeId === node.id
+    || group.groundNodeId === node.id
+  )) ?? null;
+  if (linkageGroup?.layerId && getSceneLayer(sceneGraph, linkageGroup.layerId)) {
+    return linkageGroup.layerId;
+  }
+
+  return getDefaultLayerId(sceneGraph);
 }
 
 export function buildParentChildEdges(nodeRegistry = {}) {
@@ -128,6 +197,7 @@ function findLinkedNode(registry, parentId, type, role) {
 }
 
 export function sanitizeLinkageGroup(rawGroup = {}, registry = {}, fallbackIndex = 1, defaults = {}) {
+  const sceneGraph = defaults?.sceneGraph ?? {};
   const id = typeof rawGroup?.id === "string" && rawGroup.id.length > 0
     ? rawGroup.id
     : `linkage-group-${fallbackIndex}`;
@@ -182,11 +252,17 @@ export function sanitizeLinkageGroup(rawGroup = {}, registry = {}, fallbackIndex
     : Number.isFinite(Number(defaults?.crankAngleOffset))
       ? Number(defaults.crankAngleOffset)
       : 0;
+  const inferredInputNode = inputGearId && registry[inputGearId] ? registry[inputGearId] : null;
+  const fallbackLayerId = getDefaultLayerId(sceneGraph);
+  const layerId = typeof rawGroup?.layerId === "string" && rawGroup.layerId.length > 0
+    ? rawGroup.layerId
+    : inferredInputNode?.layerId ?? fallbackLayerId;
 
   return {
     id,
     label,
     type,
+    layerId,
     inputGearId: inputGearId && registry[inputGearId] ? inputGearId : inputGearId,
     linkageNodeId: linkageNodeId && registry[linkageNodeId] ? linkageNodeId : linkageNodeId,
     sliderNodeId: sliderNodeId && registry[sliderNodeId] ? sliderNodeId : sliderNodeId,
@@ -237,7 +313,7 @@ export function resolveLinkageGroups(sceneGraph = {}) {
   const rawGroups = Array.isArray(sceneGraph?.linkageGroups) ? sceneGraph.linkageGroups : [];
   if (rawGroups.length > 0) {
     return rawGroups
-      .map((group, index) => sanitizeLinkageGroup(group, registry, index + 1))
+      .map((group, index) => sanitizeLinkageGroup(group, registry, index + 1, { sceneGraph }))
       .filter((group) => {
         if (group.type === "slider-crank") {
           return Boolean(group.inputGearId && group.linkageNodeId && group.sliderNodeId && group.groundNodeId);

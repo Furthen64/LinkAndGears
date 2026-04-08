@@ -68,7 +68,9 @@ function nodeRegistryToGearList(sceneGraph = {}, params = {}) {
       radius: node.radius,
       center: node.center ?? node.pose,
       meshWith: node.meshWith,
+      rigidWith: node.rigidWith,
       parentId: node.parentId,
+      layerId: node.layerId,
       role: normalizeNodeType(node.type) === "motor"
         ? "driver"
         : (["gear-driven", "driven", "primary-driven"].includes(normalizeNodeRole(node.role, node.type)) ? "driven" : (node.role ?? "gear")),
@@ -89,7 +91,9 @@ function nodeRegistryToGearList(sceneGraph = {}, params = {}) {
     radius: node.radius,
     center: node.center ?? node.pose,
     meshWith: node.meshWith,
+    rigidWith: node.rigidWith,
     parentId: node.parentId,
+    layerId: node.layerId,
     role: node.type === "motor" ? "driver" : (node.role ?? "gear"),
     showIndicator: node.showIndicator === true,
   }));
@@ -231,7 +235,7 @@ export function computeSceneState(sceneGraph, t) {
 
     for (const id of Array.from(unresolved)) {
       const node = gearsById[id];
-      const topologyParentId = node.parentId ?? node.attachmentTargetId;
+      const topologyParentId = node.rigidWith ?? node.parentId ?? node.attachmentTargetId;
       const normalizedType = normalizeNodeType(node.type);
       const normalizedRole = normalizeNodeRole(node.role, normalizedType);
       const isMotorNode = normalizedType === "motor" || normalizedRole === "motor-root" || normalizedRole === "driver";
@@ -272,7 +276,31 @@ export function computeSceneState(sceneGraph, t) {
         continue;
       }
 
-      if (node.meshWith) {
+      if (node.rigidWith) {
+        if (node.layerId && parent.layerId && node.layerId === parent.layerId) {
+          return {
+            valid: false,
+            invalidCategory: "constraint",
+            invalidReason: `Rigid stack ${parentId}<->${id} must span distinct layers`,
+            gearsById,
+            jointsById,
+          };
+        }
+
+        node.center = { ...parent.center };
+        node.angularSpeed = parent.angularSpeed;
+        node.angle = parent.angle + node.phaseOffset;
+      } else if (node.meshWith) {
+        if (node.layerId && parent.layerId && node.layerId !== parent.layerId) {
+          return {
+            valid: false,
+            invalidCategory: "constraint",
+            invalidReason: `Cross-layer mesh is not allowed for ${parentId}<->${id}`,
+            gearsById,
+            jointsById,
+          };
+        }
+
         const centerDistance = Math.hypot(node.center.x - parent.center.x, node.center.y - parent.center.y);
         const expectedDistance = parent.radius + node.radius;
         if (Math.abs(centerDistance - expectedDistance) > CENTER_DISTANCE_TOLERANCE) {
@@ -463,6 +491,8 @@ export function computeState(params, t) {
     module: node.module,
     parentId: node.parentId ?? null,
     meshPartnerId: node.meshWith ?? null,
+    rigidWith: node.rigidWith ?? null,
+    layerId: node.layerId ?? null,
     role: node.role,
     showIndicator: node.showIndicator === true,
     drawCenterMarker: node.id !== rootGearId,

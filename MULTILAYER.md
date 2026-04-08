@@ -4,7 +4,7 @@
 
 This document describes the rework needed to add real multilayer support to LinkAndGears.
 
-The current app has a single shared scene graph with gear relations defined mostly by `meshWith`, `parentId`, and canonical node IDs. That is enough for one mechanism chain, but it is not enough for a true layered system where multiple gears can occupy the same center, share the same angular motion, and still be treated as distinct nodes with different tooth counts and layer membership.
+The current app already treats `sceneGraph.nodeRegistry` as the authoritative scene graph and `sceneGraph.linkageGroups` as first-class linkage definitions, but gear relations are still inferred mostly through `meshWith`, `parentId`, attachment fallbacks, and legacy canonical expectations. That is enough for one mechanism chain, but it is not enough for a true layered system where multiple gears can occupy the same center, share the same angular motion, and still be treated as distinct nodes with different tooth counts and layer membership.
 
 The intended model is not just a visual z-order change. It is a mechanical and data-model change.
 
@@ -27,13 +27,17 @@ These are the decisions already answered by the user and should be treated as re
 
 A layer is a scene-level grouping that controls both rendering order and mechanical interaction boundaries.
 
-This means a node's `layerId` is not only a display hint. It determines:
+This means a node's `layerId` is not only a display hint. It determines or constrains:
 
 - which gears it can mesh with,
-- which linkage group it belongs to,
+- which linkage groups it is allowed to participate in,
 - how the editor organizes the scene tree,
 - how stacked gears are represented,
 - how visibility and locking are handled in the UI.
+
+Layer membership should not replace explicit linkage-group membership. Linkage groups should continue to reference concrete node IDs, and layer rules should validate those references rather than infer them implicitly.
+
+Layers are now the top-level scene hierarchy. Every persisted node in the scene must belong to some layer, with at least one default layer always present.
 
 The rework needs to separate these concepts:
 
@@ -63,6 +67,12 @@ Each node should gain a `layerId` field.
 
 Each linkage group should also gain a `layerId` field so the linkage, slider, and ground anchors can be associated with the correct layer.
 
+Linkage-owned helper nodes such as linkage anchors, sliders, ground anchors, and similar group-specific nodes should inherit `layerId` from their linkage group rather than overriding it individually.
+
+Independent nodes that are not owned by a linkage group, such as gears and free joint anchors, should store their own `layerId` directly.
+
+The layer registry should live alongside the existing authoritative `nodeRegistry` and `linkageGroups` structures rather than introducing a second competing graph representation.
+
 ### Gear nodes
 
 Each gear node must be able to express:
@@ -71,6 +81,16 @@ Each gear node must be able to express:
 - its rigid attachment target, if it is welded to another gear in the same stack
 - its tooth count and radius independently from the stack it shares a center with
 - its mesh neighbors restricted to the same layer unless explicitly bridged
+
+For welded stacks, a child gear's center should be derived from its rigid parent rather than stored redundantly on both nodes.
+
+The relation model needs to stop overloading one field for multiple meanings. The rework should treat these as distinct concepts:
+
+- `meshWith` for meshed gear constraints
+- `rigidWith` or an equivalent dedicated field for welded coaxial attachment
+- `parentId` or another attachment field only for editor hierarchy or non-gear anchor attachment
+
+If `parentId` continues to mean both rigid transmission topology and generic attachment, the solver and renderer will keep reintroducing the same ambiguity.
 
 ### Linkage groups
 
@@ -100,7 +120,7 @@ By default, a gear may only mesh with another gear on the same layer.
 
 A gear in layer 0 should not automatically mesh with a gear in layer 1 even if the geometry would otherwise line up.
 
-If cross-layer meshing is ever needed later, it should be an explicit exception, not the default.
+Cross-layer meshing is out of scope for this rework. If it is ever needed later, it should be added as an explicit exception mechanism rather than assumed by default.
 
 ### Propagation model
 
@@ -126,7 +146,7 @@ Needed changes:
 
 - resolve nodes by `layerId`
 - treat welded stacks as a rigid cluster
-- compute motion per layer or per rigid cluster
+- compute motion per layer-scoped constraint component, with rigid clusters and mesh edges evaluated separately
 - block cross-layer meshing unless explicitly allowed
 - preserve deterministic output for the same scene and time
 
@@ -147,11 +167,15 @@ The controller needs the largest UI-facing update.
 Required work:
 
 - add a dedicated layer panel
-- create, rename, reorder, hide, and lock layers
-- move selected nodes between layers
+- add a dedicated isometric view panel
+- create, rename, hide, lock, and delete layers
 - show current layer membership in the inspector
 - make layer-aware node creation defaults
 - update scene tree behavior so stacked gears are still understandable
+
+Reordering layers and moving existing nodes between layers are out of scope for the first implementation.
+
+The isometric view panel is also intentionally limited in scope for the first implementation. It only needs to render a basic non-interactive view of the current scene state and layer stacking; it does not need editing tools, selection, or camera manipulation.
 
 ### Scene import/export
 
@@ -166,6 +190,8 @@ This should include:
 
 Old presets should be removed and replaced rather than migrated in place.
 
+Temporary import shims can still exist during implementation if they reduce churn, but the new presets and normal export path should target the new schema only.
+
 ## Implementation Steps
 
 ### 1. Define the scene schema
@@ -177,7 +203,7 @@ Decisions to encode:
 - how layers are identified
 - how layer order is represented
 - how nodes are assigned to layers by default
-- how linkage groups inherit or override layer membership
+- how linkage-owned helper nodes inherit layer membership from their linkage group
 - whether there is a default layer created automatically
 
 ### 2. Update normalization and registry logic
@@ -186,6 +212,14 @@ All node normalization should preserve `layerId`.
 
 The registry and any compatibility helpers should stop assuming a single implicit mechanism chain.
 
+Normalization should also validate that:
+
+- every node references an existing `layerId`
+- every linkage group references an existing `layerId`
+- every `rigidWith` target is coaxial and non-self-referential
+- every `meshWith` target is in the same layer
+- welded child gears do not persist an independent center that can drift from the rigid parent
+
 ### 3. Update the kinematics solver
 
 Split rigid attachments from meshed attachments.
@@ -193,7 +227,7 @@ Split rigid attachments from meshed attachments.
 The solver should be able to answer:
 
 - which nodes belong to the same rigid stack
-- which nodes are meshed within a layer
+- which nodes are meshed within a layer-scoped constraint component
 - how motion propagates through a stack
 - how linkage groups select their input gear
 
@@ -211,10 +245,64 @@ Minimum useful controls:
 
 - add layer
 - rename layer
-- reorder layers
 - toggle visibility
 - toggle lock
-- assign selected node to layer
+- delete layer
+
+The first implementation should not support reordering layers or moving an existing node from one layer to another.
+
+### 5a. Define layer-panel behavior
+
+The layer panel needs explicit interaction rules so the editor and controller behave predictably.
+
+Creation defaults:
+
+- creating a new gear should require an existing selection
+- a new gear should inherit the layer of the currently selected node
+- this means the current "create gear with no selection" flow should be removed
+- new linkage groups and free joint nodes should likewise require or derive a concrete layer assignment at creation time
+
+Locking and selection:
+
+- locking a layer should immediately clear any active selection on that layer
+- nodes on a locked layer should not be selectable
+- hidden layers should not participate in hit testing
+
+Stack awareness:
+
+- selecting a welded gear should make the rest of the rigid stack visually obvious
+- this should be communicated with a clear color or highlight treatment
+- the properties or debug panel should explicitly show welded peers and stack membership
+- selecting a welded gear should not imply whole-stack move operations in v1
+
+Deletion behavior:
+
+- deleting a layer should delete all nodes on that layer
+- if a deleted node was part of a welded coaxial stack, the remaining gears on other layers should simply lose that welded relationship to the deleted node
+- layer deletion should therefore remove affected rigid edges rather than trying to preserve a partially deleted stack reference
+
+Hierarchy rules:
+
+- the scene must always contain at least one layer so every node has a valid layer assignment
+- layers should be presented as the highest-level grouping in the scene hierarchy
+- a node's layer should not be editable directly from the node inspector or properties panel
+- layer assignment changes should happen only through layer-oriented workflows, not per-node freeform editing
+
+### 5b. Add the isometric view panel
+
+The editor should include a separate isometric view panel that provides a basic spatial readout of the current multilayer scene.
+
+The first implementation should keep this panel intentionally simple:
+
+- it should render every node type that currently exists in the scene
+- it should reflect layer stacking visually well enough to make cross-layer coaxial stacks understandable
+- it should be read-only and non-interactive
+- it does not need selection, hit testing, drag operations, or camera controls
+- it does not need high-fidelity geometry beyond a basic visual approximation of the existing parts
+
+It is acceptable for the first version to render some node types as simple proxy shapes such as cylinders, discs, cubes, or other minimal primitives as long as every node in the scene is represented somehow.
+
+This panel should be treated as a secondary visualization, not as a second editor surface. The authoritative editing workflow remains in the main 2D editor and the layer panel.
 
 ### 6. Rewrite the presets
 
@@ -242,6 +330,12 @@ The inspector should tell the user:
 
 This is important because multilayer scenes will otherwise be ambiguous in the UI.
 
+The inspector should also avoid presenting welded relationships as generic parent-child edges, because that would blur the distinction between editor hierarchy and mechanical coupling.
+
+For welded gears, the inspector should surface the other gears in the rigid stack clearly enough that a cross-layer relationship is obvious without requiring the user to inspect multiple nodes manually.
+
+The inspector should display layer membership as read-only information in this first implementation.
+
 ## Data Model Expectations
 
 A practical target shape is something like:
@@ -266,7 +360,6 @@ A practical target shape is something like:
         "id": "gear-top",
         "type": "gear",
         "layerId": "layer-1",
-        "center": { "x": 0, "y": 0 },
         "toothCount": 18,
         "radius": 0.9,
         "rigidWith": "gear-base"
@@ -285,6 +378,8 @@ A practical target shape is something like:
 
 This is only a shape sketch, not implementation guidance.
 
+One important caveat for the final schema: linkage-group membership should remain explicit by node reference, not inferred from `layerId` alone.
+
 ## Acceptance Criteria
 
 The rework is successful when all of these are true:
@@ -294,6 +389,7 @@ The rework is successful when all of these are true:
 - Two gears can share the same center and angular motion while remaining distinct nodes.
 - Tooth count and radius can differ between stacked gears.
 - Gears only mesh within their layer unless a special rule says otherwise.
+- The UI includes a basic non-interactive isometric view that reflects the current scene and its layer stacking.
 - The multilayer preset visibly demonstrates the new behavior.
 - The simple preset still works as a baseline example.
 - The app no longer depends on the old legacy scene files.
@@ -309,6 +405,7 @@ It is not a small feature toggle, because layers affect:
 - rendering order
 - selection
 - layer management UI
+- isometric visualization
 - preset scenes
 - object inspection
 - import/export

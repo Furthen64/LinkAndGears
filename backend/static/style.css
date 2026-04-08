@@ -72,6 +72,75 @@ body.scene-tree-collapsed .layout {
   color: color-mix(in srgb, var(--text) 72%, transparent);
 }
 
+.layer-panel {
+  margin-top: 0.85rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--divider);
+}
+
+.layer-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
+
+.layer-panel__header h3 {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.layer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.layer-list__item {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.45rem;
+  border: 1px solid var(--divider);
+  border-radius: 0.45rem;
+}
+
+.layer-list__item[data-active="true"] {
+  border-color: #2563eb;
+  background: color-mix(in srgb, #2563eb 11%, transparent);
+}
+
+.layer-list__title-row,
+.layer-list__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.layer-list__name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+}
+
+.layer-list__meta {
+  font-size: 0.72rem;
+  color: color-mix(in srgb, var(--text) 70%, transparent);
+}
+
+.layer-list__rename {
+  flex: 1 1 100%;
+  font: inherit;
+}
+
+.layer-list__button--danger {
+  border-color: color-mix(in srgb, #dc2626 70%, var(--divider));
+  background: color-mix(in srgb, #dc2626 10%, transparent);
+}
+
 .scene-tree {
   list-style: none;
   margin: 0;
@@ -182,6 +251,40 @@ body.scene-tree-collapsed .scene-tree-panel {
   border: 1px solid var(--canvas-border);
   border-radius: 0.25rem;
   background: var(--canvas-bg);
+}
+
+.isometric-panel {
+  margin-top: 0.8rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--divider);
+}
+
+.isometric-panel__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.45rem;
+}
+
+.isometric-panel__header h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.isometric-panel__header p {
+  margin: 0;
+  font-size: 0.76rem;
+  color: color-mix(in srgb, var(--text) 70%, transparent);
+}
+
+#isometric-canvas {
+  width: 760px;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--canvas-border);
+  border-radius: 0.25rem;
+  background: color-mix(in srgb, var(--canvas-bg) 85%, black 15%);
 }
 
 .gear-slot-menu {

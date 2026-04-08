@@ -1,0 +1,146 @@
+{
+  "crank-radius": "1.2",
+  "rod-length": "3.2",
+  "slider-offset": "0",
+  "slider-axis": "horizontal",
+  "theme-mode": "dark",
+  "sceneGraph": {
+    "layers": [
+      {
+        "id": "layer-0",
+        "label": "Base Layer",
+        "zIndex": 0,
+        "visible": true,
+        "locked": false
+      },
+      {
+        "id": "layer-1",
+        "label": "Top Layer",
+        "zIndex": 1,
+        "visible": true,
+        "locked": false
+      }
+    ],
+    "rootNodeId": "motor-1",
+    "genesisNodeId": "motor-1",
+    "genesisPolicy": {
+      "allowedTypes": [
+        "motor",
+        "joint-anchor"
+      ]
+    },
+    "linkageGroups": [
+      {
+        "id": "linkage-group-1",
+        "label": "Primary Linkage",
+        "type": "slider-crank",
+        "layerId": "layer-0",
+        "inputGearId": "gear-1",
+        "linkageNodeId": "linkage-1",
+        "sliderNodeId": "slider-1",
+        "groundNodeId": "ground-1"
+      }
+    ],
+    "nodeRegistry": {
+      "motor-1": {
+        "id": "motor-1",
+        "label": "Motor1",
+        "type": "motor",
+        "role": "motor-root",
+        "layerId": "layer-0",
+        "parentId": null,
+        "attachmentTargetId": null,
+        "center": { "x": -2.5, "y": 0 },
+        "module": 0.1,
+        "teeth": 18,
+        "radiusMode": "moduleTeeth",
+        "radius": 0.9,
+        "meshWith": null,
+        "inputRpm": 17.2,
+        "inputAngularSpeed": 1.8,
+        "showIndicator": false
+      },
+      "gear-1": {
+        "id": "gear-1",
+        "label": "BaseGear",
+        "type": "gear",
+        "role": "gear-driven",
+        "layerId": "layer-0",
+        "parentId": "motor-1",
+        "attachmentTargetId": "motor-1",
+        "center": { "x": 0, "y": 0 },
+        "module": 0.1,
+        "teeth": 32,
+        "radiusMode": "moduleTeeth",
+        "radius": 1.6,
+        "meshWith": "motor-1",
+        "showIndicator": true
+      },
+      "gear-top": {
+        "id": "gear-top",
+        "label": "TopGear",
+        "type": "gear",
+        "layerId": "layer-1",
+        "parentId": "gear-1",
+        "attachmentTargetId": "gear-1",
+        "module": 0.1,
+        "teeth": 18,
+        "radiusMode": "moduleTeeth",
+        "radius": 0.9,
+        "rigidWith": "gear-1",
+        "showIndicator": true
+      },
+      "gear-2": {
+        "id": "gear-2",
+        "label": "UpperMesh",
+        "type": "gear",
+        "layerId": "layer-1",
+        "parentId": "gear-top",
+        "attachmentTargetId": "gear-top",
+        "center": { "x": 2.1, "y": 0 },
+        "module": 0.1,
+        "teeth": 24,
+        "radiusMode": "moduleTeeth",
+        "radius": 1.2,
+        "meshWith": "gear-top",
+        "showIndicator": false
+      },
+      "linkage-1": {
+        "id": "linkage-1",
+        "label": "Linkage1",
+        "type": "linkage-anchor",
+        "role": "linkage-anchor",
+        "layerId": "layer-0",
+        "parentId": "gear-1",
+        "attachmentTargetId": "gear-1"
+      },
+      "slider-1": {
+        "id": "slider-1",
+        "label": "Slider1",
+        "type": "slider",
+        "role": "slider-carriage",
+        "layerId": "layer-0",
+        "parentId": "linkage-1",
+        "attachmentTargetId": "linkage-1"
+      },
+      "ground-1": {
+        "id": "ground-1",
+        "label": "Ground1",
+        "type": "ground-anchor",
+        "role": "ground-reference",
+        "layerId": "layer-0",
+        "parentId": "linkage-1",
+        "attachmentTargetId": "linkage-1"
+      }
+    },
+    "parentChildEdges": [
+      { "parentId": "motor-1", "childId": "gear-1" },
+      { "parentId": "gear-1", "childId": "linkage-1" },
+      { "parentId": "linkage-1", "childId": "slider-1" },
+      { "parentId": "linkage-1", "childId": "ground-1" },
+      { "parentId": "gear-1", "childId": "gear-top" },
+      { "parentId": "gear-top", "childId": "gear-2" }
+    ]
+  },
+  "shared-module": "0.1"
+}

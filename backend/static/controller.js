@@ -1,6 +1,16 @@
 import { computeState } from "./kinematics.js";
-import { createTransform, drawScene, objectDetails } from "./renderer.js";
-import { buildParentChildEdges, resolveLinkageGroups, sanitizeLinkageGroup } from "./scene-graph.js";
+import { createTransform, drawIsometricScene, drawScene, objectDetails } from "./renderer.js";
+import {
+  buildParentChildEdges,
+  DEFAULT_LAYER_ID,
+  getDefaultLayerId,
+  getNodeLayerId,
+  getSceneLayer,
+  resolveLinkageGroups,
+  resolveSceneLayers,
+  sanitizeLayer,
+  sanitizeLinkageGroup,
+} from "./scene-graph.js";
 import { shouldExposeDebugGlobals } from "./debug-flags.js";
 
 export const DEFAULT_SCENE_TEMPLATE = {
@@ -203,6 +213,8 @@ function getControls() {
     refresh_view: document.getElementById("refresh-view"),
     scene_tree: document.getElementById("scene-tree"),
     scene_tree_content: document.getElementById("scene-tree-content"),
+    layer_list: document.getElementById("layer-list"),
+    add_layer: document.getElementById("add-layer"),
     add_gear: document.getElementById("add-gear"),
     add_linkage: document.getElementById("add-linkage"),
     add_joint: document.getElementById("add-joint"),
@@ -211,6 +223,7 @@ function getControls() {
     gear_slot_menu_add_linkage: document.getElementById("gear-slot-menu-add-linkage"),
     gear_slot_menu_add_joint: document.getElementById("gear-slot-menu-add-joint"),
     delete_selected: document.getElementById("delete-selected"),
+    isometric_canvas: document.getElementById("isometric-canvas"),
     status_debug: document.getElementById("status-debug"),
     selected_node_properties: document.getElementById("selected-node-properties"),
     node_properties_empty: document.getElementById("node-properties-empty"),
@@ -219,6 +232,7 @@ function getControls() {
 
 export function bootstrap() {
   const canvas = document.getElementById("mechanism-canvas");
+  const isometricCanvas = document.getElementById("isometric-canvas");
   const status = document.getElementById("status");
   if (!canvas || !status) {
     return;
@@ -228,6 +242,7 @@ export function bootstrap() {
   if (!ctx) {
     return;
   }
+  const isometricCtx = isometricCanvas?.getContext("2d") ?? null;
 
   const controls = getControls();
   const NODE_PARAM_SCHEMA = {
@@ -270,13 +285,11 @@ export function bootstrap() {
     ],
   };
   const WORKSPACE_PRESETS = {
-    default: "/static/workspaces/default.json",
-    "compact-fast": "/static/workspaces/compact-fast.json",
-    "large-slow": "/static/workspaces/large-slow.json",
-    "vertical-slider": "/static/workspaces/vertical-slider.json",
+    simple: "/static/workspaces/simple.json",
+    multilayer: "/static/workspaces/multilayer.json",
   };
   const loadedWorkspacePresets = {};
-  const NEW_SCENE_BASELINE_PATH = "/static/workspaces/new-scene.json";
+  const NEW_SCENE_BASELINE_PATH = "/static/workspaces/simple.json";
   const NEW_SCENE_FALLBACK = {
     "shared-module": "0.1",
     "crank-radius": "1.2",
@@ -285,6 +298,9 @@ export function bootstrap() {
     "slider-axis": "horizontal",
     "theme-mode": "dark",
     sceneGraph: {
+      layers: [
+        { id: DEFAULT_LAYER_ID, label: "Layer 0", zIndex: 0, visible: true, locked: false },
+      ],
       module: 0.1,
       rootNodeId: "motor-1",
       genesisNodeId: "motor-1",
@@ -300,6 +316,7 @@ export function bootstrap() {
           id: "linkage-group-1",
           label: "Primary Linkage",
           type: "slider-crank",
+          layerId: DEFAULT_LAYER_ID,
           inputGearId: "gear-1",
           linkageNodeId: "linkage-1",
           sliderNodeId: "slider-1",
@@ -332,6 +349,9 @@ export function bootstrap() {
     selectedObjectId: "gear-1",
     hitRegions: [],
     sceneGraph: {
+      layers: [
+        { id: DEFAULT_LAYER_ID, label: "Layer 0", zIndex: 0, visible: true, locked: false },
+      ],
       module: 0.1,
       rootNodeId: "motor-1",
       genesisNodeId: "motor-1",
@@ -347,6 +367,7 @@ export function bootstrap() {
           id: "linkage-group-1",
           label: "Primary Linkage",
           type: "slider-crank",
+          layerId: DEFAULT_LAYER_ID,
           inputGearId: "gear-1",
           linkageNodeId: "linkage-1",
           sliderNodeId: "slider-1",
@@ -437,9 +458,70 @@ export function bootstrap() {
     };
   }
 
+  function getSceneLayers() {
+    const normalizedLayers = resolveSceneLayers(simulation.sceneGraph ?? {});
+    simulation.sceneGraph.layers = normalizedLayers.map((layer, index) => sanitizeLayer({ ...layer, zIndex: index }, index));
+    return simulation.sceneGraph.layers;
+  }
+
+  function getActiveLayerId() {
+    const selectedNode = simulation.sceneGraph.nodeRegistry?.[simulation.selectedObjectId] ?? null;
+    if (selectedNode) {
+      return getNodeLayerId(simulation.sceneGraph, selectedNode.id);
+    }
+    return getSceneLayers()[0]?.id ?? DEFAULT_LAYER_ID;
+  }
+
+  function isLayerLocked(layerId) {
+    return getSceneLayer(simulation.sceneGraph, layerId)?.locked === true;
+  }
+
+  function isLayerVisible(layerId) {
+    return getSceneLayer(simulation.sceneGraph, layerId)?.visible !== false;
+  }
+
+  function ensureValidSceneLayers() {
+    const layers = getSceneLayers();
+    const fallbackLayerId = layers[0]?.id ?? DEFAULT_LAYER_ID;
+
+    Object.values(simulation.sceneGraph.nodeRegistry ?? {}).forEach((node) => {
+      if (!node) {
+        return;
+      }
+
+      if (!["linkage-anchor", "slider", "ground-anchor"].includes(normalizeNodeType(node.type))) {
+        node.layerId = getSceneLayer(simulation.sceneGraph, node.layerId)?.id ?? fallbackLayerId;
+      }
+    });
+
+    simulation.sceneGraph.linkageGroups = (simulation.sceneGraph.linkageGroups ?? []).map((group, index) => {
+      const inputGear = group?.inputGearId ? simulation.sceneGraph.nodeRegistry?.[group.inputGearId] ?? null : null;
+      const layerId = getSceneLayer(simulation.sceneGraph, group?.layerId)?.id
+        ?? inputGear?.layerId
+        ?? fallbackLayerId;
+      return sanitizeLinkageGroup(
+        { ...group, layerId },
+        simulation.sceneGraph.nodeRegistry ?? {},
+        index + 1,
+        { ...getLinkageGroupDefaults(group), sceneGraph: simulation.sceneGraph },
+      );
+    });
+
+    simulation.sceneGraph.linkageGroups.forEach((group) => {
+      [group.linkageNodeId, group.sliderNodeId, group.groundNodeId].forEach((nodeId) => {
+        const node = simulation.sceneGraph.nodeRegistry?.[nodeId] ?? null;
+        if (node) {
+          node.layerId = group.layerId;
+        }
+      });
+    });
+  }
+
   function syncLinkageGroups() {
     const registry = simulation.sceneGraph.nodeRegistry ?? {};
+    ensureValidSceneLayers();
     const resolvedGroups = resolveLinkageGroups({
+      layers: simulation.sceneGraph.layers,
       rootNodeId: simulation.sceneGraph.rootNodeId,
       nodeRegistry: registry,
       linkageGroups: simulation.sceneGraph.linkageGroups,
@@ -449,8 +531,17 @@ export function bootstrap() {
       group,
       registry,
       index + 1,
-      getLinkageGroupDefaults(group),
+      { ...getLinkageGroupDefaults(group), sceneGraph: simulation.sceneGraph },
     ));
+
+    simulation.sceneGraph.linkageGroups.forEach((group) => {
+      [group.linkageNodeId, group.sliderNodeId, group.groundNodeId].forEach((nodeId) => {
+        const node = registry[nodeId] ?? null;
+        if (node) {
+          node.layerId = group.layerId;
+        }
+      });
+    });
   }
 
   function syncLegacySceneStoresFromRegistry() {
@@ -509,6 +600,7 @@ export function bootstrap() {
 
   function setSceneNodeRegistry(nextRegistry) {
     simulation.sceneGraph.nodeRegistry = nextRegistry ?? {};
+    ensureValidSceneLayers();
     simulation.sceneGraph.parentChildEdges = buildParentChildEdges(simulation.sceneGraph.nodeRegistry);
     syncLinkageGroups();
     syncLegacySceneStoresFromRegistry();
@@ -525,6 +617,7 @@ export function bootstrap() {
       registry[node.id] = {
         ...node,
         type: "gear",
+        layerId: node.layerId ?? getDefaultLayerId(simulation.sceneGraph),
         attachmentTargetId: node.parentId ?? node.meshWith ?? simulation.sceneGraph.rootNodeId,
       };
     });
@@ -533,6 +626,7 @@ export function bootstrap() {
       registry[node.id] = {
         ...node,
         type: normalizeNodeType(node.type ?? "joint-anchor"),
+        layerId: node.layerId ?? getDefaultLayerId(simulation.sceneGraph),
         attachmentTargetId: node.parentId ?? node.attachmentTargetId ?? getPrimaryLinkageGroup()?.linkageNodeId ?? simulation.sceneGraph.rootNodeId,
       };
     });
@@ -614,11 +708,13 @@ export function bootstrap() {
 
   function canonicalSceneNodes() {
     const gears = canonicalGearNodes();
+    const baseLayerId = getDefaultLayerId(simulation.sceneGraph);
     const canonicalNodes = {
       "motor-1": {
         id: "motor-1",
         label: "Motor1",
         type: "motor",
+        layerId: baseLayerId,
         parentId: null,
         attachmentTargetId: null,
         meshWith:
@@ -633,6 +729,7 @@ export function bootstrap() {
         id: "gear-1",
         label: "Gear1",
         type: "gear",
+        layerId: baseLayerId,
         parentId: "motor-1",
         attachmentTargetId: "motor-1",
         meshWith: gears["gear-1"].meshWith ?? simulation.sceneGraph.canonicalGears?.["gear-1"]?.meshWith ?? "motor-1",
@@ -642,6 +739,7 @@ export function bootstrap() {
         id: "linkage-1",
         label: "Linkage1",
         type: "linkage-anchor",
+        layerId: baseLayerId,
         parentId: "gear-1",
         attachmentTargetId: "gear-1",
       },
@@ -649,6 +747,7 @@ export function bootstrap() {
         id: "slider-1",
         label: "Slider1",
         type: "slider",
+        layerId: baseLayerId,
         parentId: "linkage-1",
         attachmentTargetId: "linkage-1",
       },
@@ -656,6 +755,7 @@ export function bootstrap() {
         id: "ground-1",
         label: "Ground1",
         type: "ground-anchor",
+        layerId: baseLayerId,
         parentId: "linkage-1",
         attachmentTargetId: "linkage-1",
       },
@@ -847,10 +947,20 @@ export function bootstrap() {
     }
 
     linkageGroup.inputGearId = inputGearId;
+    linkageGroup.layerId = getNodeLayerId(simulation.sceneGraph, inputGearId);
     const linkageNode = simulation.sceneGraph.nodeRegistry?.[linkageGroup.linkageNodeId] ?? null;
     if (linkageNode) {
       linkageNode.parentId = inputGearId;
       linkageNode.attachmentTargetId = inputGearId;
+      linkageNode.layerId = linkageGroup.layerId;
+    }
+    const sliderNode = simulation.sceneGraph.nodeRegistry?.[linkageGroup.sliderNodeId] ?? null;
+    if (sliderNode) {
+      sliderNode.layerId = linkageGroup.layerId;
+    }
+    const groundNode = simulation.sceneGraph.nodeRegistry?.[linkageGroup.groundNodeId] ?? null;
+    if (groundNode) {
+      groundNode.layerId = linkageGroup.layerId;
     }
 
     relayoutLinkageGroup(linkageGroup);
@@ -1057,6 +1167,14 @@ export function bootstrap() {
 
   function addGearFromCurrentSelection() {
     syncParamsFromControls();
+    const selectedNode = simulation.sceneGraph.nodeRegistry?.[simulation.selectedObjectId] ?? null;
+    if (!selectedNode && !simulation.pendingGearSlot?.sourceGearId) {
+      setStatusMessage("Select a node before creating a gear.", {
+        debug: "add_gear blocked because no scene node is selected.",
+        level: "warn",
+      });
+      return;
+    }
     const index = getNextDynamicNodeIndex(
       "gear",
       Object.values(simulation.sceneGraph.nodeRegistry ?? {}).filter((node) => /^gear-\d+$/.test(node?.id ?? "")),
@@ -1077,12 +1195,13 @@ export function bootstrap() {
     const selectedGearFromSelection = selectedIsGear ? gearLookup[simulation.selectedObjectId] : null;
     const relationTarget = selectedGearFromSlot ?? selectedGearFromSelection ?? gearLookup[getRootNodeId()];
     if (!relationTarget?.id || !gearLookup[relationTarget.id]) {
-      setStatusMessage("Unable to add gear: no valid attachment target selected.", {
+      setStatusMessage("Select an existing gear before creating another gear.", {
         debug: `add_gear aborted; target=${relationTarget?.id ?? "none"}, root=${simulation.sceneGraph.rootNodeId}.`,
         level: "warn",
       });
       return;
     }
+    const layerId = getNodeLayerId(simulation.sceneGraph, selectedNode?.id ?? relationTarget.id);
     const shouldMesh = Boolean(relationTarget);
     const meshCenterFromDirection = shouldMesh ? resolvePlacementCenterFromDirection(relationTarget, radius, slot) : null;
     const center = meshCenterFromDirection
@@ -1101,8 +1220,10 @@ export function bootstrap() {
       id,
       label: `Gear${index}`,
       type: "gear",
+      layerId,
       parentId: relationTarget.id,
       meshWith: shouldMesh ? relationTarget.id : null,
+      rigidWith: null,
       module: canonicalModule,
       teeth: canonicalDrivenTeeth,
       radiusMode: "moduleTeeth",
@@ -1125,21 +1246,20 @@ export function bootstrap() {
 
     const registry = simulation.sceneGraph.nodeRegistry ?? {};
     const gearLookup = getGearLookup();
+    const selectedNode = simulation.sceneGraph.nodeRegistry?.[simulation.selectedObjectId] ?? null;
     const selectedGear = isGearNodeId(simulation.selectedObjectId)
       ? gearLookup[simulation.selectedObjectId]
       : null;
-    const inputGear = selectedGear
-      ?? gearLookup[getPrimaryDrivenGearId()]
-      ?? gearLookup[getRootNodeId()]
-      ?? null;
+    const inputGear = selectedGear ?? null;
 
     if (!inputGear) {
-      setStatusMessage("Unable to add linkage: no motor or gear node is available.", {
-        debug: "add_linkage aborted because no valid input gear was resolved.",
+      setStatusMessage("Select a gear before creating a linkage.", {
+        debug: `add_linkage blocked; selected=${selectedNode?.id ?? "none"}.`,
         level: "warn",
       });
       return;
     }
+    const layerId = getNodeLayerId(simulation.sceneGraph, inputGear.id);
 
     const linkageIndex = getNextDynamicNodeIndex(
       "linkage",
@@ -1177,6 +1297,7 @@ export function bootstrap() {
       label: `Linkage${linkageIndex}`,
       type: "linkage-anchor",
       role: "linkage-anchor",
+      layerId,
       parentId: inputGear.id,
       attachmentTargetId: inputGear.id,
     }, { id: linkageId, label: `Linkage${linkageIndex}`, type: "linkage-anchor" });
@@ -1186,6 +1307,7 @@ export function bootstrap() {
       label: `Slider${sliderIndex}`,
       type: "slider",
       role: "slider-carriage",
+      layerId,
       parentId: linkageId,
       attachmentTargetId: linkageId,
     }, { id: sliderId, label: `Slider${sliderIndex}`, type: "slider" });
@@ -1195,6 +1317,7 @@ export function bootstrap() {
       label: `Ground${groundIndex}`,
       type: "ground-anchor",
       role: "ground-reference",
+      layerId,
       parentId: linkageId,
       attachmentTargetId: linkageId,
       center: { x: groundX, y: defaultSliderOffset },
@@ -1206,6 +1329,7 @@ export function bootstrap() {
         id: groupId,
         label: `Linkage ${groupIndex}`,
         type: "slider-crank",
+        layerId,
         inputGearId: inputGear.id,
         linkageNodeId: linkageId,
         sliderNodeId: sliderId,
@@ -1227,6 +1351,14 @@ export function bootstrap() {
   }
 
   function addJointFromCurrentSelection() {
+    const selectedNode = simulation.sceneGraph.nodeRegistry?.[simulation.selectedObjectId] ?? null;
+    if (!selectedNode) {
+      setStatusMessage("Select a node before creating a joint.", {
+        debug: "add_joint blocked because no scene node is selected.",
+        level: "warn",
+      });
+      return;
+    }
     const index = getNextDynamicNodeIndex(
       "joint",
       Object.values(simulation.sceneGraph.nodeRegistry ?? {}).filter((node) => /^joint-\d+$/.test(node?.id ?? "")),
@@ -1249,6 +1381,7 @@ export function bootstrap() {
       id,
       label: `Joint${index}`,
       type: "joint-anchor",
+      layerId: getNodeLayerId(simulation.sceneGraph, selectedNode.id),
       parentId: attachmentTargetId,
       attachmentTargetId,
     }, { id, label: `Joint${index}`, type: "joint-anchor" });
@@ -1389,12 +1522,14 @@ export function bootstrap() {
     return {
       id,
       label,
+      layerId: typeof rawNode?.layerId === "string" ? rawNode.layerId : getDefaultLayerId(simulation.sceneGraph),
       parentId: typeof rawNode?.parentId === "string"
         ? rawNode.parentId
         : typeof rawNode?.meshWith === "string"
           ? rawNode.meshWith
           : null,
       meshWith: typeof rawNode?.meshWith === "string" ? rawNode.meshWith : null,
+      rigidWith: typeof rawNode?.rigidWith === "string" ? rawNode.rigidWith : null,
       module: moduleValue,
       teeth: teethValue,
       radiusMode: rawNode?.radiusMode === "manual" ? "manual" : "moduleTeeth",
@@ -1424,6 +1559,7 @@ export function bootstrap() {
       id: rawNode?.id ?? `joint-${fallbackIndex}`,
       label: rawNode?.label ?? `Joint${fallbackIndex}`,
       type: normalizeNodeType(rawNode?.type ?? "joint-anchor"),
+      layerId: typeof rawNode?.layerId === "string" ? rawNode.layerId : getDefaultLayerId(simulation.sceneGraph),
       parentId: resolvedParentId,
       attachmentTargetId: typeof rawNode?.attachmentTargetId === "string"
         ? rawNode.attachmentTargetId
@@ -1438,12 +1574,17 @@ export function bootstrap() {
   }
 
   function sanitizeRegistryNode(rawNode, fallback = {}) {
+    const nodeType = normalizeNodeType(rawNode?.type ?? fallback.type ?? "gear");
+    const fallbackLayerId = getDefaultLayerId(simulation.sceneGraph);
     return {
       ...rawNode,
       id: rawNode?.id ?? fallback.id,
       label: rawNode?.label ?? fallback.label ?? rawNode?.id ?? fallback.id,
-      type: normalizeNodeType(rawNode?.type ?? fallback.type ?? "gear"),
+      type: nodeType,
       role: typeof rawNode?.role === "string" ? rawNode.role : (fallback.role ?? null),
+      layerId: typeof rawNode?.layerId === "string"
+        ? rawNode.layerId
+        : (typeof fallback?.layerId === "string" ? fallback.layerId : fallbackLayerId),
       parentId: typeof rawNode?.parentId === "string" ? rawNode.parentId : (fallback.parentId ?? null),
       attachmentTargetId: typeof rawNode?.attachmentTargetId === "string"
         ? rawNode.attachmentTargetId
@@ -1461,6 +1602,7 @@ export function bootstrap() {
       radiusMode: rawNode?.radiusMode === "manual" ? "manual" : (fallback.radiusMode ?? "moduleTeeth"),
       radius: Number.isFinite(Number(rawNode?.radius)) ? Number(rawNode.radius) : fallback.radius,
       meshWith: typeof rawNode?.meshWith === "string" ? rawNode.meshWith : (fallback.meshWith ?? null),
+      rigidWith: typeof rawNode?.rigidWith === "string" ? rawNode.rigidWith : (fallback.rigidWith ?? null),
       inputRpm: Number.isFinite(Number(rawNode?.inputRpm)) ? Number(rawNode.inputRpm) : fallback.inputRpm,
       inputAngularSpeed: Number.isFinite(Number(rawNode?.inputAngularSpeed ?? rawNode?.angularSpeed))
         ? Number(rawNode.inputAngularSpeed ?? rawNode.angularSpeed)
@@ -1523,6 +1665,7 @@ export function bootstrap() {
         0.1,
       ),
     );
+    simulation.sceneGraph.layers = resolveSceneLayers(graph);
     simulation.sceneGraph.module = sharedModule;
     simulation.sceneGraph.canonicalGears = {
       "motor-1": {
@@ -1559,7 +1702,7 @@ export function bootstrap() {
     simulation.sceneGraph.extraGears = inputExtraGears.map((node, index) => sanitizeExtraGearNode(node, index + 2));
     simulation.sceneGraph.extraJoints = inputExtraJoints.map((node, index) => sanitizeExtraJointNode(node, index + 1));
     simulation.sceneGraph.linkageGroups = Array.isArray(graph.linkageGroups)
-      ? graph.linkageGroups.map((group, index) => sanitizeLinkageGroup(group, graph.nodeRegistry ?? {}, index + 1, linkageDefaults))
+      ? graph.linkageGroups.map((group, index) => sanitizeLinkageGroup(group, graph.nodeRegistry ?? {}, index + 1, { ...linkageDefaults, sceneGraph: { ...graph, layers: simulation.sceneGraph.layers } }))
       : [];
     simulation.sceneGraph.deletedCanonicalNodeIds = Array.isArray(graph.deletedCanonicalNodeIds)
       ? graph.deletedCanonicalNodeIds.filter((id) => typeof id === "string")
@@ -1612,16 +1755,12 @@ export function bootstrap() {
 
   function buildTreeModel() {
     const registry = simulation.sceneGraph.nodeRegistry ?? {};
-    const rootId = simulation.sceneGraph.rootNodeId;
-    const rootSource = registry[rootId];
-    if (!rootSource) {
-      return [];
-    }
-
     const nodesById = new Map(
       Object.values(registry).map((node) => [node.id, makeNode(node.id, node.label ?? node.id)]),
     );
     const { childrenByParent } = buildEdgeMaps();
+    const layerGroups = getSceneLayers().map((layer) => makeNode(layer.id, layer.label, []));
+    const layerGroupById = new Map(layerGroups.map((layer) => [layer.id, layer]));
 
     const visited = new Set();
     function attachChildren(nodeId) {
@@ -1639,16 +1778,54 @@ export function bootstrap() {
         if (!childNode) {
           return;
         }
+        if (getNodeLayerId(simulation.sceneGraph, childId) !== getNodeLayerId(simulation.sceneGraph, nodeId)) {
+          return;
+        }
         treeNode.children.push(childNode);
         attachChildren(childId);
       });
     }
 
-    attachChildren(rootId);
-    return [nodesById.get(rootId)];
+    Object.values(registry).forEach((node) => {
+      const nodeType = normalizeNodeType(node?.type);
+      if (["slider", "ground-anchor", "linkage-anchor"].includes(nodeType) && getLinkageGroupForNodeId(node.id)) {
+        return;
+      }
+
+      const layerId = getNodeLayerId(simulation.sceneGraph, node.id);
+      const parentId = node.parentId;
+      const parentLayerId = parentId ? getNodeLayerId(simulation.sceneGraph, parentId) : null;
+      const treeNode = nodesById.get(node.id);
+      if (!treeNode) {
+        return;
+      }
+
+      if (parentId && parentLayerId === layerId && nodesById.has(parentId)) {
+        return;
+      }
+
+      layerGroupById.get(layerId)?.children.push(treeNode);
+      attachChildren(node.id);
+    });
+
+    return layerGroups;
+  }
+
+  function isSelectedLayerBlocked() {
+    if (!simulation.selectedObjectId) {
+      return false;
+    }
+    const layerId = getNodeLayerId(simulation.sceneGraph, simulation.selectedObjectId);
+    return !isLayerVisible(layerId) || isLayerLocked(layerId);
   }
 
   function selectObjectById(objectId) {
+    if (objectId) {
+      const layerId = getNodeLayerId(simulation.sceneGraph, objectId);
+      if (!isLayerVisible(layerId) || isLayerLocked(layerId)) {
+        objectId = null;
+      }
+    }
     simulation.selectedObjectId = objectId;
     syncLinkageControlsFromGroup();
     clearPendingGearSlot();
@@ -1710,6 +1887,18 @@ export function bootstrap() {
     }
 
     const deletedSet = new Set(subtreeIds);
+    Object.values(simulation.sceneGraph.nodeRegistry ?? {}).forEach((node) => {
+      if (!node || deletedSet.has(node.id)) {
+        return;
+      }
+
+      if (node.rigidWith && deletedSet.has(node.rigidWith)) {
+        node.rigidWith = null;
+      }
+      if (node.meshWith && deletedSet.has(node.meshWith)) {
+        node.meshWith = null;
+      }
+    });
     const nextRegistry = Object.fromEntries(
       Object.entries(simulation.sceneGraph.nodeRegistry ?? {}).filter(([candidateId]) => !deletedSet.has(candidateId)),
     );
@@ -1767,6 +1956,7 @@ export function bootstrap() {
   function createTreeNodeElement(node) {
     const li = document.createElement("li");
     li.setAttribute("role", "treeitem");
+    const isLayerNode = Boolean(getSceneLayer(simulation.sceneGraph, node.id)) && !simulation.sceneGraph.nodeRegistry?.[node.id];
 
     const nodeRow = document.createElement("div");
     nodeRow.className = "scene-tree__row";
@@ -1776,8 +1966,14 @@ export function bootstrap() {
     button.className = "scene-tree__node";
     button.dataset.objectId = node.id;
     button.textContent = node.label;
-    button.setAttribute("aria-selected", String(simulation.selectedObjectId === node.id));
+    button.setAttribute("aria-selected", String(!isLayerNode && simulation.selectedObjectId === node.id));
     button.addEventListener("click", () => {
+      if (isLayerNode) {
+        const firstNode = Object.values(simulation.sceneGraph.nodeRegistry ?? {}).find((entry) => getNodeLayerId(simulation.sceneGraph, entry.id) === node.id) ?? null;
+        selectObjectById(firstNode?.id ?? null);
+        return;
+      }
+
       selectObjectById(node.id);
     });
 
@@ -1818,6 +2014,144 @@ export function bootstrap() {
     const model = buildTreeModel();
     model.forEach((node) => controls.scene_tree.appendChild(createTreeNodeElement(node)));
     simulation.sceneTreeDirty = false;
+  }
+
+  function deleteLayerById(layerId) {
+    const layer = getSceneLayer(simulation.sceneGraph, layerId);
+    const layers = getSceneLayers();
+    if (!layer || layers.length <= 1) {
+      setStatusMessage("The scene must keep at least one layer.", {
+        debug: `deleteLayerById blocked for ${layerId}.`,
+        level: "warn",
+      });
+      return;
+    }
+
+    const deletedNodeIds = new Set(
+      Object.values(simulation.sceneGraph.nodeRegistry ?? {})
+        .filter((node) => getNodeLayerId(simulation.sceneGraph, node.id) === layerId)
+        .map((node) => node.id),
+    );
+
+    simulation.sceneGraph.layers = layers
+      .filter((candidate) => candidate.id !== layerId)
+      .map((candidate, index) => ({ ...candidate, zIndex: index }));
+    simulation.sceneGraph.linkageGroups = getResolvedLinkageGroups()
+      .filter((group) => group.layerId !== layerId)
+      .map((group) => ({ ...group }));
+    Object.values(simulation.sceneGraph.nodeRegistry ?? {}).forEach((node) => {
+      if (deletedNodeIds.has(node.id)) {
+        return;
+      }
+      if (node.rigidWith && deletedNodeIds.has(node.rigidWith)) {
+        node.rigidWith = null;
+      }
+      if (node.meshWith && deletedNodeIds.has(node.meshWith)) {
+        node.meshWith = null;
+      }
+      if (node.parentId && deletedNodeIds.has(node.parentId)) {
+        node.parentId = null;
+      }
+      if (node.attachmentTargetId && deletedNodeIds.has(node.attachmentTargetId)) {
+        node.attachmentTargetId = null;
+      }
+    });
+    const nextRegistry = Object.fromEntries(
+      Object.entries(simulation.sceneGraph.nodeRegistry ?? {}).filter(([nodeId]) => !deletedNodeIds.has(nodeId)),
+    );
+
+    setSceneNodeRegistry(nextRegistry);
+    simulation.sceneTreeDirty = true;
+    if (!simulation.selectedObjectId || deletedNodeIds.has(simulation.selectedObjectId) || isSelectedLayerBlocked()) {
+      selectObjectById(getRootNodeId());
+    }
+    setStatusMessage(`Deleted layer ${layer.label} and ${deletedNodeIds.size} node${deletedNodeIds.size === 1 ? "" : "s"}.`, {
+      debug: `deleteLayerById(layerId=${layerId}, deletedNodeCount=${deletedNodeIds.size})`,
+    });
+  }
+
+  function renderLayerList() {
+    if (!controls.layer_list) {
+      return;
+    }
+
+    controls.layer_list.innerHTML = "";
+    const activeLayerId = getActiveLayerId();
+    getSceneLayers().forEach((layer) => {
+      const item = document.createElement("li");
+      item.className = "layer-list__item";
+      item.dataset.active = String(layer.id === activeLayerId);
+
+      const titleRow = document.createElement("div");
+      titleRow.className = "layer-list__title-row";
+
+      const title = document.createElement("button");
+      title.type = "button";
+      title.className = "layer-list__name";
+      title.textContent = layer.label;
+      title.addEventListener("click", () => {
+        const candidateNode = Object.values(simulation.sceneGraph.nodeRegistry ?? {}).find((node) => getNodeLayerId(simulation.sceneGraph, node.id) === layer.id) ?? null;
+        if (candidateNode) {
+          selectObjectById(candidateNode.id);
+        }
+      });
+
+      const meta = document.createElement("span");
+      meta.className = "layer-list__meta";
+      meta.textContent = `${layer.visible ? "visible" : "hidden"} • ${layer.locked ? "locked" : "editable"}`;
+
+      titleRow.append(title, meta);
+
+      const rename = document.createElement("input");
+      rename.className = "layer-list__rename";
+      rename.type = "text";
+      rename.value = layer.label;
+      rename.addEventListener("change", () => {
+        layer.label = rename.value.trim() || layer.id;
+        simulation.sceneTreeDirty = true;
+        renderScene();
+      });
+
+      const actions = document.createElement("div");
+      actions.className = "layer-list__actions";
+
+      const visibilityButton = document.createElement("button");
+      visibilityButton.type = "button";
+      visibilityButton.textContent = layer.visible ? "Hide" : "Show";
+      visibilityButton.addEventListener("click", () => {
+        layer.visible = !layer.visible;
+        if (isSelectedLayerBlocked()) {
+          selectObjectById(null);
+        }
+        simulation.sceneTreeDirty = true;
+        renderScene();
+      });
+
+      const lockButton = document.createElement("button");
+      lockButton.type = "button";
+      lockButton.textContent = layer.locked ? "Unlock" : "Lock";
+      lockButton.addEventListener("click", () => {
+        layer.locked = !layer.locked;
+        if (isSelectedLayerBlocked()) {
+          selectObjectById(null);
+        }
+        simulation.sceneTreeDirty = true;
+        renderScene();
+      });
+
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "layer-list__button--danger";
+      deleteButton.textContent = "Delete";
+      deleteButton.addEventListener("click", () => {
+        deleteLayerById(layer.id);
+        renderScene();
+      });
+
+      actions.append(visibilityButton, lockButton, deleteButton);
+      item.append(titleRow, rename, actions);
+      controls.layer_list.appendChild(item);
+    });
   }
 
   function clampCameraZoom(zoom) {
@@ -1913,6 +2247,7 @@ export function bootstrap() {
       simulation.params = {
         ...normalization.params,
         scene_graph: {
+          layers: simulation.sceneGraph.layers,
           module: simulation.sceneGraph.module,
           rootNodeId: simulation.sceneGraph.rootNodeId,
           genesisNodeId: simulation.sceneGraph.genesisNodeId,
@@ -2165,10 +2500,12 @@ export function bootstrap() {
 
     if (simulation.sceneTreeDirty) {
       renderSceneTree();
+      renderLayerList();
       return;
     }
 
     updateSceneTreeSelection();
+    renderLayerList();
   }
 
   function renderScene() {
@@ -2187,6 +2524,17 @@ export function bootstrap() {
       },
       simulation.camera
     );
+
+    if (isometricCtx && isometricCanvas) {
+      drawIsometricScene(
+        isometricCtx,
+        isometricCanvas,
+        simulation.params,
+        state,
+        simulation.selectedObjectId,
+        { theme: getTheme() },
+      );
+    }
 
     updateSelectionPanel(state);
     updateGearSlotMenu();
@@ -2331,6 +2679,7 @@ export function bootstrap() {
     return {
       ...buildCurrentSceneJson(),
       sceneGraph: {
+        layers: simulation.sceneGraph.layers,
         rootNodeId: simulation.sceneGraph.rootNodeId,
         genesisNodeId: simulation.sceneGraph.genesisNodeId,
         genesisPolicy: simulation.sceneGraph.genesisPolicy,
@@ -2608,6 +2957,20 @@ export function bootstrap() {
     addGearFromCurrentSelection();
   });
 
+  controls.add_layer?.addEventListener("click", () => {
+    const nextIndex = getSceneLayers().length;
+    const nextLayer = sanitizeLayer({
+      id: `layer-${nextIndex}`,
+      label: `Layer ${nextIndex}`,
+      zIndex: nextIndex,
+      visible: true,
+      locked: false,
+    }, nextIndex);
+    simulation.sceneGraph.layers = [...getSceneLayers(), nextLayer].map((layer, index) => ({ ...layer, zIndex: index }));
+    simulation.sceneTreeDirty = true;
+    renderScene();
+  });
+
   controls.gear_slot_menu_add_gear?.addEventListener("click", () => {
     addGearFromCurrentSelection();
   });
@@ -2690,7 +3053,7 @@ export function bootstrap() {
     if (matchedSlot) {
       simulation.pendingGearSlot = matchedSlot;
       setStatusMessage("Placement slot selected. Choose an action from the popup or toolbar.", {
-        debug: `Pending gear slot anchored to ${simulation.pendingGearSlot.anchorId}.`,
+        debug: `Pending gear slot anchored to ${simulation.pendingGearSlot.sourceGearId}.`,
       });
       renderScene();
       return;
@@ -2845,7 +3208,7 @@ export function bootstrap() {
   setSceneNodeRegistry(buildRegistryFromLegacySceneData());
   rebuildNodeRegistry();
   renderSceneTree();
-  void applyPreset(controls.workspace_preset?.value ?? "default");
+  void applyPreset(controls.workspace_preset?.value ?? "simple");
   loadSceneTemplate("/static/templates/default-scene.json").then((scene) => {
     simulation.scene = scene;
     applyInputConstraints(simulation.scene.inputConstraints);

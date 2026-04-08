@@ -1,4 +1,12 @@
-import { getSceneNode, resolveLinkageGroups, resolvePrimaryDrivenGearId, resolveSceneRootGearId } from "./scene-graph.js";
+import {
+  getNodeLayerId,
+  getSceneLayer,
+  getSceneNode,
+  resolveLinkageGroups,
+  resolvePrimaryDrivenGearId,
+  resolveSceneLayers,
+  resolveSceneRootGearId,
+} from "./scene-graph.js";
 import { shouldExposeDebugGlobals } from "./debug-flags.js";
 
 export function createTransform(canvas, params, camera = {}) {
@@ -160,6 +168,8 @@ function normalizeGearNode(rawNode, fallback, index = 0) {
     module: fallback.module,
     parentId: rawNode?.parentId ?? rawNode?.parent ?? null,
     meshPartnerId: rawNode?.meshPartnerId ?? rawNode?.meshWith ?? null,
+    rigidWith: rawNode?.rigidWith ?? fallback.rigidWith ?? null,
+    layerId: rawNode?.layerId ?? fallback.layerId ?? null,
     renderStyle: rawNode?.renderStyle ?? rawNode?.style ?? null,
     role: rawNode?.role ?? fallback.role,
     showIndicator: rawNode?.showIndicator === true ? true : fallback.showIndicator === true,
@@ -167,6 +177,42 @@ function normalizeGearNode(rawNode, fallback, index = 0) {
     drawMotorHub: rawNode?.drawMotorHub ?? fallback.drawMotorHub,
     zIndex: Number.isFinite(rawNode?.zIndex) ? rawNode.zIndex : index,
   };
+}
+
+function getLayerOrderMap(sceneGraph = {}) {
+  return new Map(resolveSceneLayers(sceneGraph).map((layer, index) => [layer.id, index]));
+}
+
+function getGearNodeStyle(scene, node) {
+  if (node.role === "driver") {
+    return scene.driverGear;
+  }
+
+  if (node.rigidWith) {
+    return {
+      ...scene.gear,
+      stroke: "#f59e0b",
+      fill: "#fef3c7",
+    };
+  }
+
+  return scene.gear;
+}
+
+function isNodeVisible(sceneGraph = {}, node) {
+  const layerId = node?.layerId ?? getNodeLayerId(sceneGraph, node?.id ?? node);
+  const layer = getSceneLayer(sceneGraph, layerId);
+  return layer ? layer.visible !== false : true;
+}
+
+function isNodeSelectable(sceneGraph = {}, node) {
+  if (!isNodeVisible(sceneGraph, node)) {
+    return false;
+  }
+
+  const layerId = node?.layerId ?? getNodeLayerId(sceneGraph, node?.id ?? node);
+  const layer = getSceneLayer(sceneGraph, layerId);
+  return layer ? layer.locked !== true : true;
 }
 
 function getGearToothPhaseOffset(node, geometry) {
@@ -242,6 +288,7 @@ function computeGearNodes(params, state) {
   const drivenGearId = resolveDrivenGearId(params, state, rootGearId);
   const rootRegistryNode = registry[rootGearId] ?? {};
   const drivenRegistryNode = registry[drivenGearId] ?? {};
+  const layerOrder = getLayerOrderMap(params.scene_graph ?? {});
   const extraGearConfigById = Object.fromEntries(
     Object.values(registry)
       .filter((node) => node && node.type === "gear" && node.id !== drivenGearId)
@@ -260,6 +307,8 @@ function computeGearNodes(params, state) {
       parentId: null,
       role: "driver",
       showIndicator: rootRegistryNode?.showIndicator === true,
+      rigidWith: rootRegistryNode?.rigidWith ?? null,
+      layerId: getNodeLayerId(params.scene_graph ?? {}, rootGearId),
       drawMotorHub: true,
       drawCenterMarker: false,
     },
@@ -277,6 +326,8 @@ function computeGearNodes(params, state) {
       parentId: rootGearId,
       role: "driven",
       showIndicator: drivenRegistryNode?.showIndicator === false ? false : true,
+      rigidWith: drivenRegistryNode?.rigidWith ?? null,
+      layerId: getNodeLayerId(params.scene_graph ?? {}, drivenGearId),
       drawMotorHub: false,
       drawCenterMarker: true,
     },
@@ -306,10 +357,15 @@ function computeGearNodes(params, state) {
       meshPartnerId: null,
       role: "gear",
       showIndicator: extraNodeConfig?.showIndicator === true,
+      rigidWith: extraNodeConfig?.rigidWith ?? null,
+      layerId: getNodeLayerId(params.scene_graph ?? {}, node?.id),
       drawCenterMarker: false,
       drawMotorHub: false,
     };
-    return normalizeGearNode(node, fallback, index);
+    const normalized = normalizeGearNode(node, fallback, index);
+    normalized.layerId = normalized.layerId ?? getNodeLayerId(params.scene_graph ?? {}, normalized.id);
+    normalized.zIndex = (layerOrder.get(normalized.layerId) ?? 0) * 1000 + index;
+    return normalized;
   });
 }
 
@@ -568,17 +624,26 @@ export function objectDetails(selection, params, state) {
   const primaryLinkageGroup = linkageGroups[0] ?? null;
   const selectedGearNode = gearNodes.find((node) => node.id === selection);
   if (selectedGearNode) {
-    const relation = selectedGearNode.parentId ?? selectedGearNode.meshPartnerId ?? "None";
+    const relation = selectedGearNode.rigidWith ?? selectedGearNode.parentId ?? selectedGearNode.meshPartnerId ?? "None";
+    const relationLabel = selectedGearNode.rigidWith
+      ? "Rigid with"
+      : (selectedGearNode.parentId ? "Parent id" : "Mesh partner id");
+    const weldedPeers = gearNodes
+      .filter((node) => node.id !== selectedGearNode.id && (node.rigidWith === selectedGearNode.id || selectedGearNode.rigidWith === node.id))
+      .map((node) => node.id)
+      .join(", ") || "None";
     return {
       title: `Gear (${selectedGearNode.id})`,
       details: [
+        ["Layer", selectedGearNode.layerId ?? "None"],
         ["Radius", formatValue(selectedGearNode.radius)],
         ["Module", formatValue(selectedGearNode.module)],
         ["Teeth", formatValue(selectedGearNode.toothCount, 0)],
         ["Current angle", formatValue(selectedGearNode.angle)],
         ["Angular speed (rad/s)", formatValue(selectedGearNode.angularSpeed)],
         ["Center", `(${formatValue(selectedGearNode.center.x)}, ${formatValue(selectedGearNode.center.y)})`],
-        [selectedGearNode.parentId ? "Parent id" : "Mesh partner id", relation],
+        [relationLabel, relation],
+        ["Rigid stack peers", weldedPeers],
       ],
     };
   }
@@ -630,6 +695,7 @@ export function objectDetails(selection, params, state) {
     return {
       title: `Linkage (${selectedLinkageGroup.id})`,
       details: [
+        ["Layer", selectedLinkageGroup.layerId ?? "None"],
         ["Crank radius", formatValue(selectedLinkageGroup.crankRadius)],
         ["Crank arm length (actual)", formatValue(currentCrankArmLength)],
         ["Rod length", formatValue(selectedLinkageGroup.rodLength)],
@@ -646,6 +712,7 @@ export function objectDetails(selection, params, state) {
     return {
       title: `Ground (${selectedGroundGroup.groundNodeId ?? selectedGroundGroup.id})`,
       details: [
+        ["Layer", selectedGroundGroup.layerId ?? "None"],
         ["Slider axis", selectedGroundGroup.sliderAxis],
         ["Rail offset", formatValue(selectedGroundGroup.sliderOffset)],
         ["Ground origin", `(${formatValue(selectedGroundGroup.ground?.x)}, ${formatValue(selectedGroundGroup.ground?.y)})`],
@@ -659,6 +726,7 @@ export function objectDetails(selection, params, state) {
     return {
       title: `Slider (${selectedSliderGroup.sliderNodeId ?? selectedSliderGroup.id})`,
       details: [
+        ["Layer", selectedSliderGroup.layerId ?? "None"],
         ["Axis", selectedSliderGroup.sliderAxis],
         ["Offset", formatValue(selectedSliderGroup.sliderOffset)],
         ["Position", `(${formatValue(selectedSliderGroup.slider?.x)}, ${formatValue(selectedSliderGroup.slider?.y)})`],
@@ -671,6 +739,7 @@ export function objectDetails(selection, params, state) {
     return {
       title: `Joint (${selectedJointNode.id})`,
       details: [
+        ["Layer", getNodeLayerId(params.scene_graph ?? {}, selectedJointNode.id)],
         ["Parent id", selectedJointNode.parentId ?? "None"],
         ["Position", `(${formatValue(selectedJointNode.center.x)}, ${formatValue(selectedJointNode.center.y)})`],
       ],
@@ -685,7 +754,10 @@ export function objectDetails(selection, params, state) {
 
 export function drawScene(ctx, canvas, params, state, scene, selectedObject, options = {}, camera = {}) {
   const t = createTransform(canvas, params, camera);
-  const gearNodes = computeGearNodes(params, state).sort((a, b) => a.zIndex - b.zIndex);
+  const layerOrder = getLayerOrderMap(params.scene_graph ?? {});
+  const gearNodes = computeGearNodes(params, state)
+    .filter((node) => isNodeVisible(params.scene_graph ?? {}, node))
+    .sort((a, b) => a.zIndex - b.zIndex || (layerOrder.get(a.layerId) ?? 0) - (layerOrder.get(b.layerId) ?? 0));
   const jointNodes = computeJointNodes(params, state, gearNodes);
   const linkageGroups = resolveRuntimeLinkageGroups(params, state, gearNodes);
   const isLightTheme = options.theme === "light";
@@ -720,7 +792,12 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
     });
   }
 
-  const renderedGears = gearNodes.map((node) => ({ node, ...drawGearNode(ctx, t, params, scene, node) }));
+  const selectedRigidPeers = new Set(
+    gearNodes
+      .filter((node) => node.id === selectedObject || node.rigidWith === selectedObject)
+      .flatMap((node) => [node.id, node.rigidWith].filter(Boolean)),
+  );
+  const renderedGears = gearNodes.map((node) => ({ node, ...drawGearNode(ctx, t, params, { ...scene, gear: getGearNodeStyle(scene, node), driverGear: getGearNodeStyle(scene, node) }, node) }));
   renderedGears.forEach(({ node, centerCanvas, geometry }) => {
     if (node.showIndicator !== true) {
       return;
@@ -929,6 +1006,21 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
     }
   }
 
+  renderedGears.forEach(({ node, centerCanvas, geometry }) => {
+    if (!selectedRigidPeers.has(node.id) || selectedRigidPeers.size <= 1) {
+      return;
+    }
+
+    ctx.save();
+    ctx.strokeStyle = "#f59e0b";
+    ctx.setLineDash([5, 4]);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(centerCanvas.x, centerCanvas.y, geometry.tipRadiusPx + 10, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  });
+
   const railTolerance = 8;
   const linkageTolerance = 8;
   const hitRegions = [
@@ -954,14 +1046,14 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
       contains(point) {
         return Math.hypot(point.x - entry.centerCanvas.x, point.y - entry.centerCanvas.y) <= entry.geometry.tipRadiusPx + 4;
       },
-    })),
+    })).filter((region) => isNodeSelectable(params.scene_graph ?? {}, { id: region.id })),
     ...jointNodes.map((joint) => ({
       id: joint.id,
       contains(point) {
         const centerCanvas = t.toCanvas(joint.center);
         return Math.hypot(point.x - centerCanvas.x, point.y - centerCanvas.y) <= jointRadiusPx + 4;
       },
-    })),
+    })).filter((region) => isNodeSelectable(params.scene_graph ?? {}, { id: region.id })),
     ...slotRegions.map((slotRegion) => ({
       id: slotRegion.id,
       sourceGearId: slotRegion.sourceGearId,
@@ -1017,6 +1109,141 @@ export function drawScene(ctx, canvas, params, state, scene, selectedObject, opt
   return hitRegions;
 }
 
+function isoProject(point, layerDepth = 0) {
+  return {
+    x: point.x - point.y,
+    y: (point.x + point.y) * 0.55 - layerDepth,
+  };
+}
+
+function drawIsoDisc(ctx, x, y, radius, height, fill, stroke) {
+  ctx.fillStyle = fill;
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = 1.25;
+
+  ctx.beginPath();
+  ctx.ellipse(x, y - height, radius, radius * 0.4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.ellipse(x, y, radius, radius * 0.4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(x - radius, y);
+  ctx.lineTo(x - radius, y - height);
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + radius, y - height);
+  ctx.stroke();
+}
+
+function drawIsoBox(ctx, x, y, width, depth, height, fill, stroke) {
+  ctx.fillStyle = fill;
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = 1.2;
+
+  const top = [
+    { x, y: y - height },
+    { x: x + width, y: y - height - depth * 0.5 },
+    { x: x + width + depth, y: y - height },
+    { x: x + depth, y: y - height + depth * 0.5 },
+  ];
+  const front = [
+    top[0],
+    top[3],
+    { x: top[3].x, y: y + depth * 0.5 },
+    { x: x, y },
+  ];
+
+  [top, front].forEach((face) => {
+    ctx.beginPath();
+    face.forEach((point, index) => {
+      if (index === 0) {
+        ctx.moveTo(point.x, point.y);
+      } else {
+        ctx.lineTo(point.x, point.y);
+      }
+    });
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  });
+}
+
+export function drawIsometricScene(ctx, canvas, params, state, selectedObject = null, options = {}) {
+  const sceneGraph = params.scene_graph ?? {};
+  const layers = resolveSceneLayers(sceneGraph);
+  const layerIndex = new Map(layers.map((layer, index) => [layer.id, index]));
+  const gearNodes = computeGearNodes(params, state);
+  const jointNodes = computeJointNodes(params, state, gearNodes);
+  const linkageGroups = resolveRuntimeLinkageGroups(params, state, gearNodes);
+  const sliderCentersById = Object.fromEntries(linkageGroups.filter((group) => group.sliderNodeId && group.slider).map((group) => [group.sliderNodeId, group.slider]));
+  const groundCentersById = Object.fromEntries(linkageGroups.filter((group) => group.groundNodeId && group.ground).map((group) => [group.groundNodeId, group.ground]));
+  const linkageCentersById = Object.fromEntries(linkageGroups.filter((group) => group.linkageNodeId && group.inputGearNode).map((group) => [group.linkageNodeId, group.inputGearNode.center]));
+  const nodes = [
+    ...gearNodes.map((node) => ({ ...node, kind: "gear", center: node.center })),
+    ...Object.keys(linkageCentersById).map((id) => ({ id, kind: "linkage-anchor", center: linkageCentersById[id], layerId: getNodeLayerId(sceneGraph, id) })),
+    ...Object.keys(sliderCentersById).map((id) => ({ id, kind: "slider", center: sliderCentersById[id], layerId: getNodeLayerId(sceneGraph, id) })),
+    ...Object.keys(groundCentersById).map((id) => ({ id, kind: "ground-anchor", center: groundCentersById[id], layerId: getNodeLayerId(sceneGraph, id) })),
+    ...jointNodes.map((node) => ({ id: node.id, kind: "joint-anchor", center: node.center, layerId: getNodeLayerId(sceneGraph, node.id) })),
+  ].filter((node) => isNodeVisible(sceneGraph, node));
+
+  const projected = nodes.map((node) => {
+    const layerDepth = (layerIndex.get(node.layerId ?? getNodeLayerId(sceneGraph, node.id)) ?? 0) * 22;
+    const point = isoProject(node.center ?? { x: 0, y: 0 }, layerDepth);
+    return { ...node, projected: point, layerDepth };
+  });
+
+  const bounds = projected.reduce((acc, node) => {
+    acc.minX = Math.min(acc.minX, node.projected.x);
+    acc.maxX = Math.max(acc.maxX, node.projected.x);
+    acc.minY = Math.min(acc.minY, node.projected.y);
+    acc.maxY = Math.max(acc.maxY, node.projected.y);
+    return acc;
+  }, { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
+  const width = Number.isFinite(bounds.maxX - bounds.minX) ? Math.max(1, bounds.maxX - bounds.minX) : 1;
+  const height = Number.isFinite(bounds.maxY - bounds.minY) ? Math.max(1, bounds.maxY - bounds.minY) : 1;
+  const scale = Math.min((canvas.width - 60) / width, (canvas.height - 50) / height, 28);
+  const offsetX = canvas.width / 2 - ((bounds.minX + bounds.maxX) / 2) * scale;
+  const offsetY = canvas.height / 2 - ((bounds.minY + bounds.maxY) / 2) * scale + 18;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = options.theme === "light" ? "#f8fafc" : "#0f172a";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const sorted = projected.sort((a, b) => (a.projected.y - b.projected.y) || (layerIndex.get(a.layerId) ?? 0) - (layerIndex.get(b.layerId) ?? 0));
+  sorted.forEach((node) => {
+    const x = node.projected.x * scale + offsetX;
+    const y = node.projected.y * scale + offsetY;
+    const isSelected = selectedObject && (selectedObject === node.id || selectedObject === node.rigidWith);
+    const stroke = isSelected ? "#f59e0b" : "#1f2937";
+
+    if (node.kind === "gear") {
+      drawIsoDisc(ctx, x, y, Math.max(7, node.radius * scale * 0.55), 12, node.rigidWith ? "#fde68a" : (node.role === "driver" ? "#99f6e4" : "#bfdbfe"), stroke);
+      return;
+    }
+
+    if (node.kind === "slider") {
+      drawIsoBox(ctx, x - 10, y, 18, 10, 12, "#86efac", stroke);
+      return;
+    }
+
+    if (node.kind === "ground-anchor") {
+      drawIsoBox(ctx, x - 12, y, 24, 12, 7, "#cbd5e1", stroke);
+      return;
+    }
+
+    if (node.kind === "linkage-anchor") {
+      drawIsoDisc(ctx, x, y, 7, 8, "#fca5a5", stroke);
+      return;
+    }
+
+    drawIsoBox(ctx, x - 6, y, 12, 8, 10, "#67e8f9", stroke);
+  });
+}
+
 if (typeof globalThis !== "undefined" && shouldExposeDebugGlobals()) {
-  globalThis.LinkAndGearsRenderer = { drawScene, createTransform, objectDetails };
+  globalThis.LinkAndGearsRenderer = { drawScene, drawIsometricScene, createTransform, objectDetails };
 }
