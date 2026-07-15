@@ -83,6 +83,13 @@
           </select>
         </label>
         <label>
+          Simulation mode
+          <select id="simulation-mode">
+            <option value="kinematic" selected>Kinematic (deterministic)</option>
+            <option value="physics">Physics (Box3D backend)</option>
+          </select>
+        </label>
+        <label>
           Shared module (scene)
           <input id="shared-module" type="number" step="0.01" min="0.001" value="0.1" />
         </label>

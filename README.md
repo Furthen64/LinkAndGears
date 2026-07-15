@@ -39,6 +39,24 @@ This is **not a physics engine**. It focuses solely on deterministic kinematics 
 Alternatively, you can run the app directly using Uvicorn:
 `uvicorn backend.main:app --reload`
 
+## Simulation modes
+
+The browser keeps the deterministic `kinematic` solver as its default. Scenes
+can also select `physics`; until the optional native Box3D library is built,
+that mode reports and uses the deterministic fallback through the versioned
+API:
+
+- `POST /api/v1/physics/validate`
+- `POST /api/v1/physics/reset`
+- `POST /api/v1/physics/step`
+- `GET /api/v1/physics/state`
+
+The physics scene schema is versioned and supports bodies, fixtures, gravity,
+motors, and joints. The native boundary is under `native/`: the C ABI hides
+Box3D types from Rust, Python, and JavaScript, while `native/rust` provides the
+ownership-safe wrapper. Box3D integration is optional and does not change the
+kinematic fallback.
+
 ## File Structure
 
 ```
