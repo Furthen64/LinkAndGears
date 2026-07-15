@@ -7,6 +7,7 @@ PYTHON_BIN="${PYTHON_BIN:-python}"
 cd "$SCRIPT_DIR"
 exec "$PYTHON_BIN" - <<'PY'
 from copy import deepcopy
+from math import isclose
 
 from backend.physics import FallbackPhysicsWorld, PHYSICS_SCHEMA_VERSION, validate_scene
 
@@ -34,7 +35,7 @@ state = world.step(count=2)
 
 if state["backend"] != "fallback":
     raise SystemExit(f"unexpected backend: {state['backend']}")
-if state["time"] != 2.0 / 60.0:
+if not isclose(state["time"], 2.0 / 60.0):
     raise SystemExit(f"unexpected simulation time: {state['time']}")
 body = state["bodies"][0]
 if body["position"]["x"] <= initial["bodies"][0]["position"]["x"]:
@@ -44,7 +45,7 @@ if body["position"]["y"] >= initial["bodies"][0]["position"]["y"]:
 
 world.reset()
 reset_state = world.state()
-if reset_state["time"] != 0.0 or reset_state["bodies"] != initial["bodies"]:
+if not isclose(reset_state["time"], 0.0) or reset_state["bodies"] != initial["bodies"]:
     raise SystemExit("reset did not restore the initial state")
 
 print("Physics computation checks passed.")

@@ -2,7 +2,7 @@
 
 int main(void) {
     lag_world *world = lag_world_create(0.0, -9.81);
-    if (world == 0) {
+    if (world == NULL) {
         return 1;
     }
 
