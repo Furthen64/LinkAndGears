@@ -12,11 +12,15 @@ fail() {
   exit 1
 }
 
+host_value() {
+  "$@" 2>/dev/null || echo unknown
+}
+
 command -v "$CC_BIN" >/dev/null 2>&1 || fail "C compiler not found: $CC_BIN"
 command -v cargo >/dev/null 2>&1 || fail "cargo is not installed"
 command -v "$PYTHON_BIN" >/dev/null 2>&1 || fail "Python is not available: $PYTHON_BIN"
 
-echo "Host: $(uname -s 2>/dev/null || echo unknown) $(uname -m 2>/dev/null || echo unknown)"
+echo "Host: $(host_value uname -s) $(host_value uname -m)"
 echo "C compiler: $("$CC_BIN" --version 2>/dev/null | head -n 1)"
 echo "Rust: $(rustc --version)"
 echo "Python: $("$PYTHON_BIN" --version 2>&1)"

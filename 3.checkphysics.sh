@@ -11,10 +11,12 @@ from math import isclose
 
 from backend.physics import FallbackPhysicsWorld, PHYSICS_SCHEMA_VERSION, validate_scene
 
+EXPECTED_FPS = 60.0
+
 scene = {
     "schemaVersion": PHYSICS_SCHEMA_VERSION,
     "gravity": {"x": 0.0, "y": -9.81},
-    "fixedTimeStep": 1.0 / 60.0,
+    "fixedTimeStep": 1.0 / EXPECTED_FPS,
     "bodies": [
         {
             "id": "probe",
@@ -35,7 +37,7 @@ state = world.step(count=2)
 
 if state["backend"] != "fallback":
     raise SystemExit(f"unexpected backend: {state['backend']}")
-if not isclose(state["time"], 2.0 / 60.0):
+if not isclose(state["time"], 2.0 / EXPECTED_FPS):
     raise SystemExit(f"unexpected simulation time: {state['time']}")
 body = state["bodies"][0]
 if body["position"]["x"] <= initial["bodies"][0]["position"]["x"]:

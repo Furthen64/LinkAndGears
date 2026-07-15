@@ -41,8 +41,8 @@ Alternatively, you can run the app directly using Uvicorn:
 
 ## Host compatibility checks
 
-After the native and physics changes, run these checks from the repository
-root:
+Run these checks from the repository root after changing native code or
+physics behavior:
 
 ```bash
 ./2.checkhost.sh
