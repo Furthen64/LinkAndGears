@@ -39,6 +39,23 @@ This is **not a physics engine**. It focuses solely on deterministic kinematics 
 Alternatively, you can run the app directly using Uvicorn:
 `uvicorn backend.main:app --reload`
 
+## Host compatibility checks
+
+Run these checks from the repository root after changing native code or
+physics behavior:
+
+```bash
+./2.checkhost.sh
+./3.checkphysics.sh
+```
+
+`2.checkhost.sh` verifies Python, Rust, and a warning-clean C compiler, then
+builds and runs a temporary probe against the native adapter ABI. It does not
+install dependencies or modify the repository. `3.checkphysics.sh` exercises
+scene validation, deterministic stepping, gravity, and reset behavior without
+requiring the optional native Box3D library. Set `CC` or `PYTHON_BIN` to use
+specific host tools.
+
 ## Simulation modes
 
 The browser keeps the deterministic `kinematic` solver as its default. Scenes
