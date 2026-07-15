@@ -30,6 +30,7 @@ This is **not a physics engine**. It focuses solely on deterministic kinematics 
 1. **Start the development server**:
    - Activate the virtual environment: `source venv/bin/activate`
    - Run the backend: `./run-backend.sh`
+   - The script requires an already active virtual environment and will exit instead of creating or activating one for you.
 2. **Access the application**:
    - Open `http://127.0.0.1:8000` in your browser.
 
