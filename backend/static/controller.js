@@ -2,6 +2,7 @@ import { computeState } from "./kinematics.js";
 import { createTransform, drawScene, objectDetails } from "./renderer.js";
 import { buildParentChildEdges, resolveLinkageGroups, sanitizeLinkageGroup } from "./scene-graph.js";
 import { shouldExposeDebugGlobals } from "./debug-flags.js";
+import { normalizeSimulationMode, simulationModeMessage } from "./simulation-mode.js";
 
 export const DEFAULT_SCENE_TEMPLATE = {
   rail: {
@@ -187,6 +188,7 @@ function getControls() {
     slider_offset: document.getElementById("slider-offset"),
     slider_axis: document.getElementById("slider-axis"),
     theme_mode: document.getElementById("theme-mode"),
+    simulation_mode: document.getElementById("simulation-mode"),
     shared_module: document.getElementById("shared-module"),
     derived_driver_radius: document.getElementById("derived-driver-radius"),
     derived_gear_radius: document.getElementById("derived-gear-radius"),
@@ -325,6 +327,7 @@ export function bootstrap() {
     version: "1.0.0",
   };
   const simulation = {
+    mode: "kinematic",
     isPlaying: true,
     timeSeconds: 0,
     lastTimestamp: null,
@@ -2205,11 +2208,13 @@ export function bootstrap() {
 
     setStatusMessage(
       state.valid
-        ? `${simulation.isPlaying ? "Running" : "Paused"} (${simulation.params.slider_axis}) t=${simulation.timeSeconds.toFixed(2)}s`
+        ? `${simulation.isPlaying ? "Running" : "Paused"} [${simulation.mode}] (${simulation.params.slider_axis}) t=${simulation.timeSeconds.toFixed(2)}s`
         : `${invalidPrefix}: ${invalidDetail}`,
       {
-        debug: state.valid ? null : `${state.invalidCategory ?? "unknown"}: ${state.invalidReason ?? "missing reason"}`,
-        level: state.valid ? "info" : "warn",
+        debug: simulation.mode === "physics"
+          ? simulationModeMessage(simulation.mode)
+          : (state.valid ? null : `${state.invalidCategory ?? "unknown"}: ${state.invalidReason ?? "missing reason"}`),
+        level: simulation.mode === "physics" || !state.valid ? "warn" : "info",
       },
     );
   }
@@ -2515,6 +2520,10 @@ export function bootstrap() {
   });
   controls.theme_mode?.addEventListener("change", () => {
     applyTheme(controls.theme_mode.value);
+    renderScene();
+  });
+  controls.simulation_mode?.addEventListener("change", () => {
+    simulation.mode = normalizeSimulationMode(controls.simulation_mode.value);
     renderScene();
   });
 
@@ -2840,6 +2849,7 @@ export function bootstrap() {
   canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
   applyTheme(controls.theme_mode?.value);
+  simulation.mode = normalizeSimulationMode(controls.simulation_mode?.value);
   syncSharedModuleControl();
   applyInputConstraints(simulation.scene.inputConstraints);
   setSceneNodeRegistry(buildRegistryFromLegacySceneData());
