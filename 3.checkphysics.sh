@@ -47,8 +47,10 @@ if body["position"]["y"] >= initial["bodies"][0]["position"]["y"]:
 
 world.reset()
 reset_state = world.state()
-if not isclose(reset_state["time"], 0.0) or reset_state["bodies"] != initial["bodies"]:
-    raise SystemExit("reset did not restore the initial state")
+if not isclose(reset_state["time"], 0.0):
+    raise SystemExit("reset did not restore simulation time")
+if reset_state["bodies"] != initial["bodies"]:
+    raise SystemExit("reset did not restore body state")
 
 print("Physics computation checks passed.")
 PY
