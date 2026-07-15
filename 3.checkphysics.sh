@@ -6,6 +6,8 @@ PYTHON_BIN="${PYTHON_BIN:-python}"
 
 cd "$SCRIPT_DIR"
 exec "$PYTHON_BIN" - <<'PY'
+from copy import deepcopy
+
 from backend.physics import FallbackPhysicsWorld, PHYSICS_SCHEMA_VERSION, validate_scene
 
 scene = {
@@ -27,8 +29,8 @@ if errors:
     raise SystemExit(f"valid scene rejected: {errors}")
 
 world = FallbackPhysicsWorld(scene)
-initial = world.state()
-state = world.step(steps=2)
+initial = deepcopy(world.state())
+state = world.step(count=2)
 
 if state["backend"] != "fallback":
     raise SystemExit(f"unexpected backend: {state['backend']}")
