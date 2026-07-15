@@ -2206,15 +2206,17 @@ export function bootstrap() {
     const invalidField = resolveFieldNameFromReason(state.invalidReason, simulation.scene.inputConstraints);
     const invalidDetail = invalidField ? `[${invalidField}] ${state.invalidReason}` : state.invalidReason;
 
+    const statusDebug = simulation.mode === "physics"
+      ? simulationModeMessage(simulation.mode)
+      : (state.valid ? null : `${state.invalidCategory ?? "unknown"}: ${state.invalidReason ?? "missing reason"}`);
+    const statusLevel = simulation.mode === "physics" || !state.valid ? "warn" : "info";
     setStatusMessage(
       state.valid
         ? `${simulation.isPlaying ? "Running" : "Paused"} [${simulation.mode}] (${simulation.params.slider_axis}) t=${simulation.timeSeconds.toFixed(2)}s`
         : `${invalidPrefix}: ${invalidDetail}`,
       {
-        debug: simulation.mode === "physics"
-          ? simulationModeMessage(simulation.mode)
-          : (state.valid ? null : `${state.invalidCategory ?? "unknown"}: ${state.invalidReason ?? "missing reason"}`),
-        level: simulation.mode === "physics" || !state.valid ? "warn" : "info",
+        debug: statusDebug,
+        level: statusLevel,
       },
     );
   }

@@ -67,6 +67,9 @@ class FallbackPhysicsWorld:
         if errors:
             raise ValueError("; ".join(errors))
         self.scene = normalize_scene(scene)
+        self._initialize_state()
+
+    def _initialize_state(self):
         self.time = 0.0
         gravity = self.scene["gravity"]
         self.gravity = (_number(gravity.get("x")), _number(gravity.get("y"), -9.81))
@@ -84,7 +87,7 @@ class FallbackPhysicsWorld:
             }
 
     def reset(self):
-        self.__init__(self.scene)
+        self._initialize_state()
 
     def step(self, count=1, dt=None):
         dt = _number(dt, _number(self.scene.get("fixedTimeStep"), 1.0 / 60.0))

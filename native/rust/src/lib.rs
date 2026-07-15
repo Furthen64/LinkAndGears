@@ -1,7 +1,5 @@
 //! Ownership-safe Rust boundary for the C-compatible Box3D adapter.
 
-use std::ffi::c_void;
-
 #[repr(C)]
 pub struct BodyState {
     pub id: u64,
@@ -14,18 +12,18 @@ pub struct BodyState {
 }
 
 #[repr(C)]
-struct LagWorld {
+struct OpaqueWorld {
     _private: [u8; 0],
 }
 
 unsafe extern "C" {
-    fn lag_world_create(gravity_x: f64, gravity_y: f64) -> *mut LagWorld;
-    fn lag_world_destroy(world: *mut LagWorld);
-    fn lag_world_step(world: *mut LagWorld, dt: f64, solver_iterations: i32) -> i32;
+    fn lag_world_create(gravity_x: f64, gravity_y: f64) -> *mut OpaqueWorld;
+    fn lag_world_destroy(world: *mut OpaqueWorld);
+    fn lag_world_step(world: *mut OpaqueWorld, dt: f64, solver_iterations: i32) -> i32;
 }
 
 pub struct World {
-    raw: *mut LagWorld,
+    raw: *mut OpaqueWorld,
 }
 
 impl World {
@@ -51,9 +49,4 @@ unsafe impl Send for World {}
 #[no_mangle]
 pub extern "C" fn lag_rust_abi_version() -> u32 {
     1
-}
-
-#[allow(dead_code)]
-fn opaque_pointer_size() -> usize {
-    std::mem::size_of::<*mut c_void>()
 }

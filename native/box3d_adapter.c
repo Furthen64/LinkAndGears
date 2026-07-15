@@ -1,4 +1,5 @@
 #include "box3d_adapter.h"
+#include <stdlib.h>
 
 /*
  * This translation unit is the stable C ABI boundary.  The Box3D-backed
@@ -12,13 +13,16 @@ struct lag_world {
 };
 
 lag_world *lag_world_create(double gravity_x, double gravity_y) {
-    (void)gravity_x;
-    (void)gravity_y;
-    return 0;
+    lag_world *world = (lag_world *)malloc(sizeof(lag_world));
+    if (world != 0) {
+        world->gravity_x = gravity_x;
+        world->gravity_y = gravity_y;
+    }
+    return world;
 }
 
 void lag_world_destroy(lag_world *world) {
-    (void)world;
+    free(world);
 }
 
 int lag_world_step(lag_world *world, double dt, int solver_iterations) {
